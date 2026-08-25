@@ -28,19 +28,6 @@
               600: '#e11d48',
               700: '#be123c',
               900: '#881337'
-            },
-            sakura: {
-              100: '#fdf2f8',
-              300: '#f472b6',
-              500: '#ec4899',
-              600: '#db2777'
-            },
-            matcha: {
-              100: '#ecfdf5',
-              400: '#34d399',
-              500: '#10b981',
-              600: '#059669',
-              900: '#064e3b'
             }
           }
         }
@@ -57,16 +44,13 @@
     rt {
       font-size: 0.58em;
       line-height: 1;
-      color: #94a3b8;
+      color: #cbd5e1;
       font-weight: 500;
       user-select: none;
       transition: all 0.2s ease;
     }
-    .dark rt {
-      color: #94a3b8;
-    }
     .furigana-target rt {
-      color: #f43f5e;
+      color: #fb7185;
       font-weight: 700;
     }
     .furigana-hidden rt {
@@ -82,13 +66,13 @@
     }
     /* Active karaoke highlight pulse */
     @keyframes sentencePulse {
-      0%, 100% { box-shadow: 0 0 0 0 rgba(244, 63, 94, 0.2); }
+      0%, 100% { box-shadow: 0 0 0 0 rgba(244, 63, 94, 0.35); }
       50% { box-shadow: 0 0 0 8px rgba(244, 63, 94, 0); }
     }
     .active-sentence {
-      animation: sentencePulse 2s infinite;
+      animation: sentencePulse 1.8s infinite;
     }
-    /* Hide scrollbar for clean mobile feel */
+    /* Hide scrollbar */
     .no-scrollbar::-webkit-scrollbar { display: none; }
     .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
   </style>
@@ -99,7 +83,7 @@
   <div class="w-full max-w-md min-h-screen bg-slate-900 border-x border-slate-800 shadow-2xl flex flex-col relative pb-32">
     
     <!-- Top Status / Header -->
-    <header class="sticky top-0 z-30 bg-slate-900/90 backdrop-blur-md border-b border-slate-800/80 px-4 py-3 flex items-center justify-between">
+    <header class="sticky top-0 z-30 bg-slate-900/95 backdrop-blur-md border-b border-slate-800/80 px-4 py-3 flex items-center justify-between">
       <div class="flex items-center space-x-2">
         <div class="w-8 h-8 rounded-xl bg-gradient-to-tr from-rose-500 to-pink-500 flex items-center justify-center font-bold text-white shadow-lg shadow-rose-500/20 font-japanese text-sm">
           日
@@ -120,10 +104,10 @@
     </header>
 
     <!-- Global Study Settings Bar -->
-    <div class="px-4 py-2.5 bg-slate-900/50 border-b border-slate-800/60 flex items-center justify-between text-xs text-slate-300">
+    <div class="px-4 py-2 bg-slate-900/70 border-b border-slate-800/60 flex items-center justify-between text-xs text-slate-300">
       <div class="flex items-center space-x-1">
         <span class="text-slate-400 text-[11px]">Furigana:</span>
-        <select id="furiganaModeSelect" class="bg-slate-800 border border-slate-700 rounded-md px-2 py-1 text-[11px] font-medium text-slate-200 focus:outline-none focus:border-rose-500">
+        <select id="furiganaModeSelect" class="bg-slate-800 border border-slate-700 rounded-md px-2 py-0.5 text-[11px] font-medium text-slate-200 focus:outline-none focus:border-rose-500">
           <option value="all">Always On</option>
           <option value="target">Target Words Only</option>
           <option value="hover">Tap / Hover Only</option>
@@ -131,13 +115,13 @@
       </div>
       <div class="flex items-center space-x-1">
         <span class="text-slate-400 text-[11px]">English:</span>
-        <button id="toggleTranslationsBtn" class="px-2 py-1 bg-slate-800 border border-slate-700 rounded-md text-[11px] font-medium hover:bg-slate-700 transition">
+        <button id="toggleTranslationsBtn" class="px-2 py-0.5 bg-slate-800 border border-slate-700 rounded-md text-[11px] font-medium hover:bg-slate-700 transition">
           Visible
         </button>
       </div>
     </div>
 
-    <!-- Voice Picker Modal (Hidden by default) -->
+    <!-- Voice Picker Modal -->
     <div id="voiceModal" class="hidden fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
       <div class="bg-slate-900 border border-slate-700 rounded-2xl p-5 w-full max-w-sm shadow-2xl">
         <div class="flex justify-between items-center mb-3">
@@ -148,7 +132,7 @@
         </div>
         <p class="text-xs text-slate-400 mb-3">Detected device voices for <code class="text-rose-400">ja-JP</code>:</p>
         <select id="voiceListSelect" class="w-full bg-slate-800 border border-slate-700 text-slate-200 rounded-xl p-2.5 text-xs mb-4 focus:ring-2 focus:ring-rose-500">
-          <option value="">Default Japanese Voice</option>
+          <option value="">Default System Japanese Voice</option>
         </select>
         <button id="saveVoiceBtn" class="w-full py-2.5 bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold rounded-xl transition">
           Done
@@ -157,8 +141,8 @@
     </div>
 
     <!-- Dynamic Variant Container -->
-    <div id="variantRoot" class="flex-1 p-4">
-      <!-- Injected by JavaScript based on current variant -->
+    <div id="variantRoot" class="flex-1 p-4 space-y-4">
+      <!-- Injected by JavaScript -->
     </div>
 
     <!-- Persistent Bottom Audio Player Controls -->
@@ -195,40 +179,81 @@
 
   </div>
 
-  <!-- FLOATING PROTOTYPE SWITCHER (Per prototype skill rules) -->
+  <!-- FLOATING PROTOTYPE SWITCHER -->
   <div class="fixed bottom-3 z-50 bg-slate-900/90 backdrop-blur-md border border-rose-500/40 text-slate-100 shadow-2xl rounded-full px-4 py-2 flex items-center space-x-3 text-xs">
     <button id="prevVariantBtn" class="p-1 hover:text-rose-400 font-bold transition">◀</button>
     <div class="flex items-center space-x-1 font-semibold">
       <span class="text-rose-400 font-bold uppercase tracking-wider text-[10px]">Variant:</span>
-      <span id="currentVariantLabel" class="text-slate-200">A (Immersive Reader)</span>
+      <span id="currentVariantLabel" class="text-slate-200">C (Dialogue Studio + Primer)</span>
     </div>
     <button id="nextVariantBtn" class="p-1 hover:text-rose-400 font-bold transition">▶</button>
     <div class="h-3 w-px bg-slate-700"></div>
     <div class="flex space-x-1">
-      <button class="var-select-btn px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-600 text-white" data-var="A">A</button>
+      <button class="var-select-btn px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-800 text-slate-300 hover:bg-slate-700" data-var="A">A</button>
       <button class="var-select-btn px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-800 text-slate-300 hover:bg-slate-700" data-var="B">B</button>
-      <button class="var-select-btn px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-800 text-slate-300 hover:bg-slate-700" data-var="C">C</button>
+      <button class="var-select-btn px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-600 text-white" data-var="C">C</button>
     </div>
   </div>
 
-  <!-- JavaScript Prototype Controller & TTS Engine -->
+  <!-- JavaScript Controller -->
   <script>
-    // 1. LESSON DATA (From our Tokenized JSON Schema)
+    // 1. LESSON DATA
     const LESSON_DATA = {
       topic: "カフェでの注文",
       topicEnglish: "Ordering at a Café",
       level: "JLPT N5",
       targetVocabulary: [
-        { word: "注文", reading: "ちゅうもん", romaji: "chuumon", meaning: "an order / to order", partOfSpeech: "Noun / Suru-verb" },
-        { word: "店員", reading: "てんいん", romaji: "ten'in", meaning: "store clerk / staff", partOfSpeech: "Noun" },
-        { word: "持ち帰り", reading: "もちかえり", romaji: "mochikaeri", meaning: "takeout / to-go", partOfSpeech: "Noun" },
-        { word: "温かい", reading: "あたたかい", romaji: "atatakai", meaning: "warm / hot (drink/food)", partOfSpeech: "I-adjective" },
-        { word: "会計", reading: "かいけい", romaji: "kaikei", meaning: "bill / payment", partOfSpeech: "Noun" }
+        { 
+          word: "注文", 
+          reading: "ちゅうもん", 
+          romaji: "chūmon", 
+          meaning: "an order / to order", 
+          partOfSpeech: "Noun / Suru-verb",
+          exampleJa: "コーヒーを注文します。",
+          exampleEn: "I will order coffee."
+        },
+        { 
+          word: "店員", 
+          reading: "てんいん", 
+          romaji: "ten'in", 
+          meaning: "store clerk / barista", 
+          partOfSpeech: "Noun",
+          exampleJa: "店員さんに聞きました。",
+          exampleEn: "I asked the store clerk."
+        },
+        { 
+          word: "持ち帰り", 
+          reading: "もちかえり", 
+          romaji: "mochikaeri", 
+          meaning: "takeout / to-go", 
+          partOfSpeech: "Noun",
+          exampleJa: "持ち帰りできますか？",
+          exampleEn: "Can I get this for takeout?"
+        },
+        { 
+          word: "温かい", 
+          reading: "あたたかい", 
+          romaji: "atatakai", 
+          meaning: "warm / hot (food or drink)", 
+          partOfSpeech: "I-adjective",
+          exampleJa: "温かいお茶を飲みます。",
+          exampleEn: "I drink warm tea."
+        },
+        { 
+          word: "会計", 
+          reading: "かいけい", 
+          romaji: "kaikei", 
+          meaning: "bill / check / payment", 
+          partOfSpeech: "Noun",
+          exampleJa: "お会計をお願いします。",
+          exampleEn: "The check, please."
+        }
       ],
       sentences: [
         {
           id: 1,
-          speaker: "Customer",
+          speaker: "Customer (You)",
+          speakerRole: "customer",
           japanese: "店員さんに温かいコーヒーを注文しました。",
           english: "I ordered a hot coffee from the store clerk.",
           tokens: [
@@ -245,11 +270,11 @@
         },
         {
           id: 2,
-          speaker: "Clerk",
-          japanese: "店員「店内でお召し上がりですか、お持ち帰りですか？」",
-          english: "Clerk: 'Will you be having this in-store, or for takeout?'",
+          speaker: "Barista (Staff)",
+          speakerRole: "clerk",
+          japanese: "「店内でお召し上がりですか、お持ち帰りですか？」",
+          english: "'Will you be having this in-store, or for takeout?'",
           tokens: [
-            { surface: "店員", reading: "てんいん", isTarget: true },
             { surface: "「", reading: "", isTarget: false },
             { surface: "店内", reading: "てんない", isTarget: false },
             { surface: "で", reading: "", isTarget: false },
@@ -265,11 +290,11 @@
         },
         {
           id: 3,
-          speaker: "Customer",
-          japanese: "私「持ち帰りでお願いします。」",
-          english: "Me: 'Takeout, please.'",
+          speaker: "Customer (You)",
+          speakerRole: "customer",
+          japanese: "「持ち帰りでお願いします。」",
+          english: "'Takeout, please.'",
           tokens: [
-            { surface: "私", reading: "わたし", isTarget: false },
             { surface: "「", reading: "", isTarget: false },
             { surface: "持ち帰り", reading: "もちかえり", isTarget: true },
             { surface: "で", reading: "", isTarget: false },
@@ -281,21 +306,25 @@
         },
         {
           id: 4,
-          speaker: "Clerk",
-          japanese: "お会計は五百円でした。",
-          english: "The bill was 500 yen.",
+          speaker: "Barista (Staff)",
+          speakerRole: "clerk",
+          japanese: "「お会計は五百円になります。」",
+          english: "'That will be 500 yen, please.'",
           tokens: [
+            { surface: "「", reading: "", isTarget: false },
             { surface: "お", reading: "", isTarget: false },
             { surface: "会計", reading: "かいけい", isTarget: true },
             { surface: "は", reading: "", isTarget: false },
             { surface: "五百円", reading: "ごひゃくえん", isTarget: false },
-            { surface: "でした", reading: "", isTarget: false },
-            { surface: "。", reading: "", isTarget: false }
+            { surface: "に", reading: "", isTarget: false },
+            { surface: "なります", reading: "", isTarget: false },
+            { surface: "。」", reading: "", isTarget: false }
           ]
         },
         {
           id: 5,
-          speaker: "Customer",
+          speaker: "Customer (You)",
+          speakerRole: "customer",
           japanese: "コーヒーを受け取って、駅へ向かいました。",
           english: "I received the coffee and headed toward the station.",
           tokens: [
@@ -314,17 +343,18 @@
 
     // 2. STATE
     const state = {
-      variant: 'A', // 'A' | 'B' | 'C'
-      furiganaMode: 'all', // 'all' | 'target' | 'hover'
+      variant: 'C', // Default to user's favorite C
+      furiganaMode: 'all',
       showEnglish: true,
       playbackRate: 1.0,
       loopSentence: false,
       activeSentenceIndex: -1,
       isPlaying: false,
-      selectedVoice: null
+      selectedVoice: null,
+      expandedVocabIndex: 0 // First vocab card open by default
     };
 
-    // 3. AUDIO SYNTHESIS ENGINE (Web Speech API)
+    // 3. AUDIO SYNTHESIS
     let synth = window.speechSynthesis;
     let jaVoices = [];
 
@@ -350,6 +380,17 @@
       if (speechSynthesis.onvoiceschanged !== undefined) {
         speechSynthesis.onvoiceschanged = populateVoices;
       }
+    }
+
+    function speakText(text, rate = state.playbackRate, onDone) {
+      if (!synth) return;
+      synth.cancel();
+      const utter = new SpeechSynthesisUtterance(text);
+      utter.lang = 'ja-JP';
+      utter.rate = rate;
+      if (state.selectedVoice) utter.voice = state.selectedVoice;
+      if (onDone) utter.onend = onDone;
+      synth.speak(utter);
     }
 
     function speakSentence(index, onComplete) {
@@ -381,11 +422,7 @@
         }
       };
 
-      utter.onerror = (e) => {
-        console.warn("Speech error:", e);
-        stopPlayback();
-      };
-
+      utter.onerror = () => stopPlayback();
       synth.speak(utter);
     }
 
@@ -418,12 +455,12 @@
       }
     }
 
-    // 4. RUBY TOKEN RENDERING HELPER
+    // 4. RUBY TOKEN RENDERING
     function renderTokens(tokens) {
       return tokens.map(t => {
         const isTarget = t.isTarget;
         const targetClass = isTarget ? 'text-rose-400 font-bold bg-rose-500/10 px-1 py-0.5 rounded' : '';
-        const rtTargetClass = isTarget ? 'is-target font-bold text-rose-400' : '';
+        const rtTargetClass = isTarget ? 'is-target font-bold text-rose-300' : '';
         
         if (!t.reading) {
           return `<span class="${targetClass}">${t.surface}</span>`;
@@ -432,17 +469,152 @@
       }).join('');
     }
 
-    // 5. RENDER VARIANTS
+    // 5. VOCABULARY PRIMER SECTION (Shared / Enhanced Component)
+    function renderVocabularyPrimer() {
+      const items = LESSON_DATA.targetVocabulary.map((v, idx) => {
+        const isExpanded = state.expandedVocabIndex === idx;
+        return `
+          <div class="bg-slate-800/80 border border-slate-700/80 rounded-2xl p-3.5 transition-all shadow-sm">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center space-x-2.5">
+                <span class="w-5 h-5 rounded-full bg-rose-500/20 text-rose-400 text-[11px] font-bold flex items-center justify-center">
+                  ${idx + 1}
+                </span>
+                <div>
+                  <div class="flex items-baseline space-x-2">
+                    <ruby class="text-lg font-bold font-japanese text-rose-400">${v.word}<rt class="text-rose-300 text-[10px] font-semibold">${v.reading}</rt></ruby>
+                    <span class="text-xs text-slate-400 font-mono tracking-wider">/ ${v.romaji} /</span>
+                  </div>
+                  <div class="text-xs text-slate-200 font-medium">${v.meaning}</div>
+                </div>
+              </div>
+              <div class="flex items-center space-x-1.5">
+                <button class="vocab-speak-btn p-2 rounded-xl bg-slate-700 hover:bg-rose-600 text-slate-200 hover:text-white transition active:scale-95" data-word="${v.word}" title="Listen to word">
+                  🔊
+                </button>
+              </div>
+            </div>
 
-    // ── Variant A: Immersive Reader (Karaoke Flow) ──
-    function renderVariantA() {
-      const vocabChips = LESSON_DATA.targetVocabulary.map(v => `
-        <div class="inline-flex items-center space-x-1.5 px-2.5 py-1 bg-slate-800/80 border border-slate-700/80 rounded-xl text-xs">
-          <ruby class="font-bold text-rose-400">${v.word}<rt class="text-rose-300 text-[9px]">${v.reading}</rt></ruby>
-          <span class="text-slate-400 text-[10px]">· ${v.meaning}</span>
+            <!-- Example sentence showing real context usage -->
+            <div class="mt-2.5 pt-2 border-t border-slate-700/60 flex items-center justify-between text-xs">
+              <div>
+                <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Example:</span>
+                <p class="text-slate-200 font-japanese text-xs font-medium">${v.exampleJa}</p>
+                <p class="text-slate-400 text-[11px]">${v.exampleEn}</p>
+              </div>
+              <button class="vocab-example-speak-btn px-2 py-1 rounded-lg bg-slate-750 hover:bg-slate-700 text-slate-300 text-[10px] font-medium border border-slate-700/70 transition" data-phrase="${v.exampleJa}">
+                ▶ Ex
+              </button>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      return `
+        <!-- Daily Vocabulary Primer Block -->
+        <div class="bg-gradient-to-br from-slate-800/90 to-slate-900 border border-slate-800 rounded-3xl p-4 shadow-xl">
+          <div class="flex items-center justify-between mb-2.5">
+            <div class="flex items-center space-x-2">
+              <span class="text-base">📚</span>
+              <h2 class="font-display font-bold text-sm text-slate-100">Step 1: Daily Target Words</h2>
+            </div>
+            <span class="px-2 py-0.5 text-[10px] font-bold rounded-full bg-rose-500/10 text-rose-400 border border-rose-500/20">
+              5 Words
+            </span>
+          </div>
+          <p class="text-xs text-slate-400 mb-3">Review and listen to these cohesive words before practicing the conversation:</p>
+          <div class="space-y-2">
+            ${items}
+          </div>
         </div>
-      `).join('');
+      `;
+    }
 
+    // ── Variant C: Dialogue Studio with Distinct Bubble Tints & Vocab Primer ──
+    function renderVariantC() {
+      const messages = LESSON_DATA.sentences.map((s, idx) => {
+        const isCustomer = s.speakerRole === "customer";
+        const isActive = state.activeSentenceIndex === idx;
+        
+        // Highly distinct color tints:
+        // Customer (You): Sakura / Rose tint
+        // Clerk (Staff): Emerald / Teal / Mint tint
+        const bubbleStyle = isCustomer
+          ? (isActive 
+              ? 'bg-gradient-to-br from-rose-600 to-pink-600 text-white border-rose-400 ring-2 ring-rose-400/80 active-sentence shadow-rose-900/40'
+              : 'bg-gradient-to-br from-rose-950/70 to-slate-900 border border-rose-500/30 text-rose-50 shadow-md')
+          : (isActive 
+              ? 'bg-gradient-to-br from-emerald-600 to-teal-600 text-white border-emerald-400 ring-2 ring-emerald-400/80 active-sentence shadow-emerald-900/40'
+              : 'bg-gradient-to-br from-emerald-950/70 to-slate-900 border border-emerald-500/30 text-emerald-50 shadow-md');
+
+        const badgeStyle = isCustomer
+          ? 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+          : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30';
+
+        const speakerIcon = isCustomer ? '👤 客 (You)' : '☕ 店 (Staff)';
+
+        return `
+          <div class="flex items-start gap-2.5 ${isCustomer ? 'flex-row-reverse' : 'flex-row'} mb-3.5 cursor-pointer sentence-row" data-index="${idx}">
+            
+            <!-- Avatar -->
+            <div class="w-8 h-8 rounded-2xl flex items-center justify-center text-xs font-bold shrink-0 shadow-md border ${badgeStyle}">
+              ${isCustomer ? '客' : '店'}
+            </div>
+
+            <!-- Speech Bubble with distinct tint -->
+            <div class="max-w-[84%] rounded-3xl p-3.5 shadow-lg border transition-all ${bubbleStyle}">
+              <div class="flex items-center justify-between gap-2 mb-1.5">
+                <span class="text-[10px] font-bold tracking-wide uppercase opacity-80 flex items-center gap-1">
+                  ${speakerIcon}
+                </span>
+                <span class="text-[10px] font-semibold opacity-70">
+                  ${isActive && state.isPlaying ? '🔊 Speaking...' : 'Tap to hear ▶'}
+                </span>
+              </div>
+
+              <!-- Japanese Text with Furigana -->
+              <div class="text-base sm:text-lg font-japanese leading-loose tracking-wide">
+                ${renderTokens(s.tokens)}
+              </div>
+
+              <!-- English Translation -->
+              ${state.showEnglish ? `
+                <p class="mt-2 text-xs opacity-85 border-t border-white/10 pt-1.5 leading-relaxed">
+                  ${s.english}
+                </p>
+              ` : ''}
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      return `
+        <div class="space-y-4">
+          <!-- Step 1: Vocabulary Primer -->
+          ${renderVocabularyPrimer()}
+
+          <!-- Step 2: Dialogue Flow Header -->
+          <div class="bg-gradient-to-br from-slate-800/70 to-slate-900/70 border border-slate-800 rounded-3xl p-4 shadow-xl">
+            <div class="flex items-center justify-between mb-1">
+              <div class="flex items-center space-x-2">
+                <span class="text-base">💬</span>
+                <h2 class="font-display font-bold text-sm text-slate-100">Step 2: Conversation Roleplay</h2>
+              </div>
+              <span class="text-xs text-rose-400 font-semibold">${LESSON_DATA.topic}</span>
+            </div>
+            <p class="text-xs text-slate-400">Tap any speech bubble below to hear that character speak:</p>
+          </div>
+
+          <!-- Speech Bubbles -->
+          <div class="pt-1">
+            ${messages}
+          </div>
+        </div>
+      `;
+    }
+
+    // ── Variant A: Immersive Reader ──
+    function renderVariantA() {
       const sentenceBlocks = LESSON_DATA.sentences.map((s, idx) => {
         const isActive = state.activeSentenceIndex === idx;
         const activeCard = isActive ? 'active-sentence bg-rose-500/10 border-rose-500/40 text-slate-50' : 'bg-slate-800/40 border-slate-800 hover:border-slate-700 text-slate-200';
@@ -450,7 +622,7 @@
           <div class="sentence-row group p-3.5 rounded-2xl border transition-all duration-200 cursor-pointer ${activeCard}" data-index="${idx}">
             <div class="flex items-start justify-between gap-3">
               <div class="flex-1">
-                <div class="text-base sm:text-lg font-japanese leading-loose tracking-wide select-text">
+                <div class="text-base sm:text-lg font-japanese leading-loose tracking-wide">
                   ${renderTokens(s.tokens)}
                 </div>
                 ${state.showEnglish ? `<p class="mt-1.5 text-xs text-slate-400 font-medium">${s.english}</p>` : ''}
@@ -465,40 +637,28 @@
 
       return `
         <div class="space-y-4">
-          <!-- Thematic Header Card -->
-          <div class="bg-gradient-to-br from-slate-800/90 to-slate-900 border border-slate-800 rounded-3xl p-4 shadow-xl">
-            <div class="flex items-center justify-between mb-2">
-              <span class="text-[10px] font-bold uppercase tracking-widest text-rose-400">Daily Passage</span>
-              <span class="text-xs text-slate-400">☕ Topic: ${LESSON_DATA.topicEnglish}</span>
-            </div>
-            <h2 class="text-xl font-bold font-japanese text-slate-100 mb-3">${LESSON_DATA.topic}</h2>
-            <div class="text-[11px] font-semibold text-slate-400 mb-1.5">Target Vocabulary to Spot:</div>
-            <div class="flex flex-wrap gap-1.5">
-              ${vocabChips}
-            </div>
-          </div>
-
-          <!-- Sentences Flow -->
+          ${renderVocabularyPrimer()}
           <div class="space-y-2.5">
+            <h3 class="text-xs font-bold uppercase tracking-wider text-slate-400 px-1">Continuous Reading Story</h3>
             ${sentenceBlocks}
           </div>
         </div>
       `;
     }
 
-    // ── Variant B: Study Cards (Bilingual Sentence Breakdown) ──
+    // ── Variant B: Study Cards ──
     function renderVariantB() {
       const cards = LESSON_DATA.sentences.map((s, idx) => {
         const isActive = state.activeSentenceIndex === idx;
-        const activeStyle = isActive ? 'active-sentence ring-2 ring-rose-500 bg-slate-800' : 'bg-slate-850 bg-slate-800/60 border border-slate-800';
+        const activeStyle = isActive ? 'active-sentence ring-2 ring-rose-500 bg-slate-800' : 'bg-slate-800/60 border border-slate-800';
         return `
           <div class="rounded-3xl p-4 shadow-lg transition-all ${activeStyle}" data-index="${idx}">
             <div class="flex justify-between items-center mb-3">
               <span class="px-2 py-0.5 text-[10px] font-bold rounded-md bg-slate-700/80 text-slate-300">
-                Sentence ${s.id} of 5
+                Sentence ${s.id} of 5 · ${s.speaker}
               </span>
               <div class="flex items-center space-x-1">
-                <button class="slow-play-btn px-2 py-1 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200 text-[10px] font-semibold transition" data-index="${idx}" title="Listen at 0.75x speed">
+                <button class="slow-play-btn px-2 py-1 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200 text-[10px] font-semibold transition" data-index="${idx}">
                   🐢 0.75x
                 </button>
                 <button class="single-play-btn px-3 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-bold transition" data-index="${idx}">
@@ -507,12 +667,10 @@
               </div>
             </div>
 
-            <!-- Japanese Text -->
             <div class="text-lg font-japanese leading-relaxed text-slate-100 mb-3">
               ${renderTokens(s.tokens)}
             </div>
 
-            <!-- English Translation Drawer -->
             <details class="group border-t border-slate-700/50 pt-2 text-xs" ${state.showEnglish ? 'open' : ''}>
               <summary class="cursor-pointer font-medium text-slate-400 hover:text-slate-200 select-none flex items-center justify-between">
                 <span>English Meaning</span>
@@ -526,52 +684,9 @@
 
       return `
         <div class="space-y-4">
-          <div class="flex items-center justify-between px-1">
-            <h2 class="font-display font-bold text-sm text-slate-200">Sentence-by-Sentence Breakdown</h2>
-            <span class="text-xs text-rose-400 font-medium">5 Cards</span>
-          </div>
+          ${renderVocabularyPrimer()}
           <div class="space-y-3">
             ${cards}
-          </div>
-        </div>
-      `;
-    }
-
-    // ── Variant C: Dialogue Studio (Conversational Bubbles) ──
-    function renderVariantC() {
-      const messages = LESSON_DATA.sentences.map((s, idx) => {
-        const isCustomer = s.speaker === "Customer";
-        const isActive = state.activeSentenceIndex === idx;
-        const bubbleColor = isCustomer 
-          ? (isActive ? 'bg-rose-600 text-white active-sentence' : 'bg-slate-800 text-slate-100 border border-slate-700')
-          : (isActive ? 'bg-pink-600 text-white active-sentence' : 'bg-slate-850 bg-slate-800/80 text-slate-100 border border-slate-700/80');
-
-        return `
-          <div class="flex items-start gap-2.5 ${isCustomer ? 'flex-row' : 'flex-row-reverse'} mb-3 cursor-pointer sentence-row" data-index="${idx}">
-            <div class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${isCustomer ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30' : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'}">
-              ${isCustomer ? '客' : '店'}
-            </div>
-            <div class="max-w-[82%] rounded-2xl p-3 shadow-md ${bubbleColor} transition-all">
-              <div class="text-[10px] font-semibold opacity-70 mb-1">
-                ${s.speaker} · Tap to hear
-              </div>
-              <div class="text-base font-japanese leading-relaxed">
-                ${renderTokens(s.tokens)}
-              </div>
-              ${state.showEnglish ? `<p class="mt-1.5 text-[11px] opacity-80 border-t border-white/10 pt-1">${s.english}</p>` : ''}
-            </div>
-          </div>
-        `;
-      }).join('');
-
-      return `
-        <div class="space-y-4">
-          <div class="bg-slate-850 bg-slate-800/40 border border-slate-800 rounded-2xl p-3 text-center">
-            <p class="text-xs font-bold text-slate-200">☕ Roleplay: Café Conversation</p>
-            <p class="text-[11px] text-slate-400">Tap any chat bubble to listen to that character speak</p>
-          </div>
-          <div class="pt-2">
-            ${messages}
           </div>
         </div>
       `;
@@ -580,8 +695,7 @@
     // 6. UI UPDATE & RE-RENDER
     function renderCurrentVariant() {
       const root = document.getElementById('variantRoot');
-      // Apply furigana class to root
-      root.className = 'flex-1 p-4';
+      root.className = 'flex-1 p-4 space-y-4';
       if (state.furiganaMode === 'target') {
         root.classList.add('furigana-target-only');
       } else if (state.furiganaMode === 'hover') {
@@ -596,7 +710,7 @@
         document.getElementById('currentVariantLabel').textContent = 'B (Study Cards)';
       } else {
         root.innerHTML = renderVariantC();
-        document.getElementById('currentVariantLabel').textContent = 'C (Dialogue Studio)';
+        document.getElementById('currentVariantLabel').textContent = 'C (Dialogue + Primer)';
       }
 
       attachDynamicListeners();
@@ -628,7 +742,6 @@
         ? 'px-2 py-1 rounded-lg text-[11px] font-bold bg-rose-600 text-white border border-rose-500'
         : 'px-2 py-1 rounded-lg text-[11px] font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700';
 
-      // Update variant pills in switcher
       document.querySelectorAll('.var-select-btn').forEach(btn => {
         if (btn.dataset.var === state.variant) {
           btn.className = 'var-select-btn px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-600 text-white';
@@ -644,7 +757,6 @@
 
     function setVariant(newVar) {
       state.variant = newVar;
-      // Sync URL search param
       const url = new URL(window.location);
       url.searchParams.set('variant', newVar);
       window.history.replaceState({}, '', url);
@@ -686,9 +798,27 @@
           speakSentence(idx);
         });
       });
+
+      // Vocab isolated word audio button
+      document.querySelectorAll('.vocab-speak-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const word = btn.dataset.word;
+          speakText(word, 0.85);
+        });
+      });
+
+      // Vocab example sentence audio button
+      document.querySelectorAll('.vocab-example-speak-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const phrase = btn.dataset.phrase;
+          speakText(phrase, 0.85);
+        });
+      });
     }
 
-    // 7. GLOBAL CONTROLS SETUP
+    // 7. GLOBAL CONTROLS
     document.getElementById('playAllBtn').addEventListener('click', togglePlayAll);
 
     document.getElementById('loopSentenceBtn').addEventListener('click', () => {
@@ -734,7 +864,7 @@
       document.getElementById('voiceModal').classList.add('hidden');
     });
 
-    // Prototype Variant Switcher
+    // Switcher
     const variants = ['A', 'B', 'C'];
     document.getElementById('prevVariantBtn').addEventListener('click', () => {
       const curIdx = variants.indexOf(state.variant);
@@ -750,20 +880,17 @@
       btn.addEventListener('click', () => setVariant(btn.dataset.var));
     });
 
-    // Keyboard navigation: Left/Right arrows to cycle variants
     window.addEventListener('keydown', (e) => {
       if (['input', 'textarea', 'select'].includes(document.activeElement.tagName.toLowerCase())) return;
       if (e.key === 'ArrowLeft') document.getElementById('prevVariantBtn').click();
       if (e.key === 'ArrowRight') document.getElementById('nextVariantBtn').click();
     });
 
-    // Init from URL param
     const initialUrlParam = new URLSearchParams(window.location.search).get('variant');
     if (initialUrlParam && variants.includes(initialUrlParam.toUpperCase())) {
       state.variant = initialUrlParam.toUpperCase();
     }
 
-    // Initial render
     renderCurrentVariant();
   </script>
 </body>
