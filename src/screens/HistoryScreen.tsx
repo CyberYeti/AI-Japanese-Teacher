@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,51 +7,62 @@ import {
   TextInput,
   TouchableOpacity,
   SafeAreaView,
+  ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { theme } from '../theme';
 import { Ionicons } from '@expo/vector-icons';
+import { storageService } from '../services';
+import { DailyLesson, JLPTLevel } from '../types/domain';
 
-const SAMPLE_HISTORY = [
-  {
-    id: '1',
-    topic: 'Ordering at a Café',
-    titleJa: 'カフェでの注文',
-    level: 'N5' as const,
-    date: 'Today, 10:30 AM',
-    wordCount: 4,
-    words: ['注文 (ちゅうもん)', 'おすすめ', 'お会計 (おかいけい)', '持ち帰り'],
-    isStarred: true,
-  },
-  {
-    id: '2',
-    topic: 'Train & Subways',
-    titleJa: '電車の乗り換え',
-    level: 'N5' as const,
-    date: 'Yesterday',
-    wordCount: 3,
-    words: ['切符 (きっぷ)', '乗り換え (のりかえ)', '何番線 (なんばんせん)'],
-    isStarred: false,
-  },
-  {
-    id: '3',
-    topic: 'Booking a Hotel Room',
-    titleJa: 'ホテルのチェックイン',
-    level: 'N4' as const,
-    date: 'Aug 23, 2026',
-    wordCount: 4,
-    words: ['予約 (よやく)', '部屋 (へや)', '禁煙 (きんえん)', '朝食 (ちょうしょく)'],
-    isStarred: true,
-  },
-];
+interface HistoryScreenProps {
+  navigation?: any;
+}
 
-export const HistoryScreen: React.FC = () => {
+export const HistoryScreen: React.FC<HistoryScreenProps> = ({ navigation }) => {
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeFilter, setActiveFilter] = useState<'all' | 'starred' | 'N5' | 'N4' | 'N3'>('all');
-  const [lessons, setLessons] = useState(SAMPLE_HISTORY);
+  const [activeFilter, setActiveFilter] = useState<'all' | 'starred' | JLPTLevel>('all');
+  const [lessons, setLessons] = useState<DailyLesson[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const toggleStar = (id: string) => {
+  const loadLessons = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      const storedLessons = await storageService.getLessons();
+      setLessons(storedLessons);
+    } catch (err) {
+      // fallback
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadLessons();
+  }, [loadLessons]);
+
+  const toggleStar = async (id: string) => {
     setLessons((prev) =>
       prev.map((item) => (item.id === id ? { ...item, isStarred: !item.isStarred } : item))
+    );
+    await storageService.toggleLessonStar(id);
+  };
+
+  const handleDeleteLesson = (id: string, topic: string) => {
+    Alert.alert(
+      'Delete Lesson',
+      `Are you sure you want to delete "${topic}" from your history?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            setLessons((prev) => prev.filter((item) => item.id !== id));
+            await storageService.deleteLesson(id);
+          },
+        },
+      ]
     );
   };
 
@@ -60,14 +71,33 @@ export const HistoryScreen: React.FC = () => {
     if (activeFilter.startsWith('N') && item.level !== activeFilter) return false;
     if (searchQuery.trim().length > 0) {
       const q = searchQuery.toLowerCase();
-      return (
-        item.topic.toLowerCase().includes(q) ||
-        item.titleJa.toLowerCase().includes(q) ||
-        item.words.some((w) => w.toLowerCase().includes(q))
+      const topicEn = (item.topicEnglish || item.topic || '').toLowerCase();
+      const topicJa = (item.topicJapanese || item.title || '').toLowerCase();
+      const wordMatch = item.targetVocabulary.some(
+        (w) =>
+          w.word.toLowerCase().includes(q) ||
+          w.reading.toLowerCase().includes(q) ||
+          w.meaning.toLowerCase().includes(q)
       );
+      return topicEn.includes(q) || topicJa.includes(q) || wordMatch;
     }
     return true;
   });
+
+  const formatDate = (isoString?: string) => {
+    if (!isoString) return 'Recently';
+    try {
+      const date = new Date(isoString);
+      return date.toLocaleDateString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch {
+      return isoString;
+    }
+  };
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -98,7 +128,7 @@ export const HistoryScreen: React.FC = () => {
         {/* Filter Pills */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll}>
           <View style={styles.filterRow}>
-            {(['all', 'starred', 'N5', 'N4', 'N3'] as const).map((filter) => {
+            {(['all', 'starred', 'N5', 'N4', 'N3', 'N2', 'N1'] as const).map((filter) => {
               const isSelected = activeFilter === filter;
               return (
                 <TouchableOpacity
@@ -118,7 +148,11 @@ export const HistoryScreen: React.FC = () => {
 
         {/* Lessons List */}
         <View style={styles.listContainer}>
-          {filteredLessons.length === 0 ? (
+          {isLoading ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="small" color={theme.colors.brand.primary} />
+            </View>
+          ) : filteredLessons.length === 0 ? (
             <View style={styles.emptyState}>
               <Ionicons name="journal-outline" size={48} color={theme.colors.text.subtle} />
               <Text style={styles.emptyTitle}>No lessons found</Text>
@@ -126,9 +160,18 @@ export const HistoryScreen: React.FC = () => {
             </View>
           ) : (
             filteredLessons.map((item) => {
-              const levelColor = theme.colors.jlpt[item.level];
+              const levelColor = theme.colors.jlpt[item.level] || theme.colors.jlpt.N5;
+              const topicEn = item.topicEnglish || item.topic || 'Lesson';
+              const topicJa = item.topicJapanese || item.title || '';
+
               return (
-                <TouchableOpacity key={item.id} style={styles.lessonCard} activeOpacity={0.7}>
+                <TouchableOpacity
+                  key={item.id}
+                  style={styles.lessonCard}
+                  activeOpacity={0.7}
+                  onPress={() => navigation?.navigate('LessonStudy', { lesson: item })}
+                  testID={`lesson-card-${item.id}`}
+                >
                   <View style={styles.cardHeader}>
                     <View style={styles.cardTitleRow}>
                       <View
@@ -142,13 +185,14 @@ export const HistoryScreen: React.FC = () => {
                         </Text>
                       </View>
                       <View style={styles.titleInfo}>
-                        <Text style={styles.cardTopic}>{item.topic}</Text>
-                        <Text style={styles.cardJa}>{item.titleJa}</Text>
+                        <Text style={styles.cardTopic}>{topicEn}</Text>
+                        <Text style={styles.cardJa}>{topicJa}</Text>
                       </View>
                     </View>
                     <TouchableOpacity
                       onPress={() => toggleStar(item.id)}
                       hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                      testID={`star-btn-${item.id}`}
                     >
                       <Ionicons
                         name={item.isStarred ? 'star' : 'star-outline'}
@@ -160,15 +204,17 @@ export const HistoryScreen: React.FC = () => {
 
                   {/* Words preview */}
                   <View style={styles.wordsPreviewRow}>
-                    {item.words.map((word, idx) => (
+                    {item.targetVocabulary.map((v, idx) => (
                       <View key={idx} style={styles.wordChip}>
-                        <Text style={styles.wordChipText}>{word}</Text>
+                        <Text style={styles.wordChipText}>
+                          {v.word} ({v.reading})
+                        </Text>
                       </View>
                     ))}
                   </View>
 
                   <View style={styles.cardFooter}>
-                    <Text style={styles.dateText}>{item.date}</Text>
+                    <Text style={styles.dateText}>{formatDate(item.createdAt)}</Text>
                     <View style={styles.reviewLink}>
                       <Text style={styles.reviewText}>Review Lesson</Text>
                       <Ionicons name="chevron-forward" size={14} color={theme.colors.brand.light} />
@@ -255,6 +301,10 @@ const styles = StyleSheet.create({
   },
   listContainer: {
     gap: theme.spacing.md,
+  },
+  loadingContainer: {
+    paddingVertical: 40,
+    alignItems: 'center',
   },
   lessonCard: {
     backgroundColor: theme.colors.background.card,

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,86 +7,50 @@ import {
   TextInput,
   TouchableOpacity,
   SafeAreaView,
+  ActivityIndicator,
 } from 'react-native';
 import { theme } from '../theme';
 import { Ionicons } from '@expo/vector-icons';
-import * as Speech from 'expo-speech';
-
-const SAMPLE_WORDS = [
-  {
-    id: 'w1',
-    word: '注文',
-    reading: 'ちゅうもん',
-    romaji: 'chuumon',
-    meaning: 'an order (for food/goods)',
-    partOfSpeech: 'noun / suru-verb',
-    level: 'N5' as const,
-    exampleJa: '注文をお願いします。',
-    exampleEn: "I'd like to order, please.",
-  },
-  {
-    id: 'w2',
-    word: 'おすすめ',
-    reading: 'おすすめ',
-    romaji: 'osusume',
-    meaning: 'recommendation',
-    partOfSpeech: 'noun',
-    level: 'N5' as const,
-    exampleJa: 'おすすめの料理は何ですか？',
-    exampleEn: "What is your recommended dish?",
-  },
-  {
-    id: 'w3',
-    word: 'お会計',
-    reading: 'おかいけい',
-    romaji: 'okaikei',
-    meaning: 'the bill / check',
-    partOfSpeech: 'noun',
-    level: 'N5' as const,
-    exampleJa: 'お会計はどこですか？',
-    exampleEn: "Where do I pay the bill?",
-  },
-  {
-    id: 'w4',
-    word: '持ち帰り',
-    reading: 'もちかえり',
-    romaji: 'mochikaeri',
-    meaning: 'takeout / to go',
-    partOfSpeech: 'noun',
-    level: 'N5' as const,
-    exampleJa: '持ち帰りでお願いします。',
-    exampleEn: "To go, please.",
-  },
-  {
-    id: 'w5',
-    word: '予約',
-    reading: 'よやく',
-    romaji: 'yoyaku',
-    meaning: 'reservation / booking',
-    partOfSpeech: 'noun / suru-verb',
-    level: 'N4' as const,
-    exampleJa: '予約を確認してください。',
-    exampleEn: 'Please confirm the reservation.',
-  },
-];
+import { storageService, audioProvider } from '../services';
+import { WordBankItem, JLPTLevel } from '../types/domain';
 
 export const WordBankScreen: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeLevelFilter, setActiveLevelFilter] = useState<'ALL' | 'N5' | 'N4' | 'N3'>('ALL');
+  const [activeLevelFilter, setActiveLevelFilter] = useState<'ALL' | JLPTLevel>('ALL');
   const [playingId, setPlayingId] = useState<string | null>(null);
+  const [words, setWords] = useState<WordBankItem[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const handlePlayWord = (id: string, text: string) => {
+  const loadWordBank = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      const storedWords = await storageService.getWordBank();
+      setWords(storedWords);
+    } catch (err) {
+      // fallback
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadWordBank();
+  }, [loadWordBank]);
+
+  const handlePlayWord = async (id: string, text: string) => {
     setPlayingId(id);
-    Speech.speak(text, {
-      language: 'ja-JP',
-      rate: 0.85,
-      onDone: () => setPlayingId(null),
-      onError: () => setPlayingId(null),
-    });
+    try {
+      await audioProvider.playSentence(text, {
+        onFinished: () => setPlayingId(null),
+        onError: () => setPlayingId(null),
+      });
+    } catch {
+      setPlayingId(null);
+    }
   };
 
-  const filteredWords = SAMPLE_WORDS.filter((item) => {
-    if (activeLevelFilter !== 'ALL' && item.level !== activeLevelFilter) return false;
+  const filteredWords = words.filter((item) => {
+    if (activeLevelFilter !== 'ALL' && item.jlptLevel !== activeLevelFilter) return false;
     if (searchQuery.trim().length > 0) {
       const q = searchQuery.toLowerCase();
       return (
@@ -109,7 +73,7 @@ export const WordBankScreen: React.FC = () => {
             <Text style={styles.subtitle}>Cumulative vocabulary from daily lessons</Text>
           </View>
           <View style={styles.countBadge}>
-            <Text style={styles.countNumber}>{SAMPLE_WORDS.length}</Text>
+            <Text style={styles.countNumber}>{words.length}</Text>
             <Text style={styles.countLabel}>Words</Text>
           </View>
         </View>
@@ -132,27 +96,34 @@ export const WordBankScreen: React.FC = () => {
         </View>
 
         {/* Filter Pills */}
-        <View style={styles.filterRow}>
-          {(['ALL', 'N5', 'N4', 'N3'] as const).map((filter) => {
-            const isSelected = activeLevelFilter === filter;
-            return (
-              <TouchableOpacity
-                key={filter}
-                onPress={() => setActiveLevelFilter(filter)}
-                style={[styles.filterPill, isSelected && styles.filterPillActive]}
-                activeOpacity={0.7}
-              >
-                <Text style={[styles.filterPillText, isSelected && styles.filterPillTextActive]}>
-                  {filter === 'ALL' ? 'All Words' : filter}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll}>
+          <View style={styles.filterRow}>
+            {(['ALL', 'N5', 'N4', 'N3', 'N2', 'N1'] as const).map((filter) => {
+              const isSelected = activeLevelFilter === filter;
+              return (
+                <TouchableOpacity
+                  key={filter}
+                  onPress={() => setActiveLevelFilter(filter)}
+                  style={[styles.filterPill, isSelected && styles.filterPillActive]}
+                  activeOpacity={0.7}
+                  testID={`filter-pill-${filter}`}
+                >
+                  <Text style={[styles.filterPillText, isSelected && styles.filterPillTextActive]}>
+                    {filter === 'ALL' ? 'All Words' : filter}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </ScrollView>
 
         {/* Words List */}
         <View style={styles.listContainer}>
-          {filteredWords.length === 0 ? (
+          {isLoading ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="small" color={theme.colors.brand.primary} />
+            </View>
+          ) : filteredWords.length === 0 ? (
             <View style={styles.emptyState}>
               <Ionicons name="book-outline" size={48} color={theme.colors.text.subtle} />
               <Text style={styles.emptyTitle}>No words match your search</Text>
@@ -160,7 +131,8 @@ export const WordBankScreen: React.FC = () => {
           ) : (
             filteredWords.map((item) => {
               const isPlaying = playingId === item.id;
-              const levelColor = theme.colors.jlpt[item.level];
+              const levelColor = theme.colors.jlpt[item.jlptLevel] || theme.colors.jlpt.N5;
+
               return (
                 <View key={item.id} style={styles.wordCard}>
                   <View style={styles.cardTop}>
@@ -174,16 +146,19 @@ export const WordBankScreen: React.FC = () => {
                           ]}
                         >
                           <Text style={[styles.levelBadgeText, { color: levelColor.text }]}>
-                            {item.level}
+                            {item.jlptLevel}
                           </Text>
                         </View>
                       </View>
-                      <Text style={styles.readingText}>{item.reading} · {item.romaji}</Text>
+                      <Text style={styles.readingText}>
+                        {item.reading} · {item.romaji}
+                      </Text>
                     </View>
                     <TouchableOpacity
                       style={[styles.audioButton, isPlaying && styles.audioButtonPlaying]}
                       onPress={() => handlePlayWord(item.id, item.word)}
                       activeOpacity={0.7}
+                      testID={`play-word-${item.id}`}
                     >
                       <Ionicons
                         name={isPlaying ? 'volume-high' : 'volume-medium-outline'}
@@ -198,10 +173,26 @@ export const WordBankScreen: React.FC = () => {
                     <Text style={styles.posText}>{item.partOfSpeech}</Text>
                   </View>
 
-                  <View style={styles.exampleBox}>
-                    <Text style={styles.exampleJa}>{item.exampleJa}</Text>
-                    <Text style={styles.exampleEn}>{item.exampleEn}</Text>
-                  </View>
+                  {item.examples && item.examples.length > 0 && (
+                    <View style={styles.exampleBox}>
+                      <View style={styles.exampleHeaderRow}>
+                        <Text style={styles.exampleJa}>{item.examples[0].japanese}</Text>
+                        <TouchableOpacity
+                          onPress={() =>
+                            handlePlayWord(`ex-${item.id}`, item.examples[0].japanese)
+                          }
+                          hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                        >
+                          <Ionicons
+                            name="volume-medium-outline"
+                            size={16}
+                            color={theme.colors.brand.light}
+                          />
+                        </TouchableOpacity>
+                      </View>
+                      <Text style={styles.exampleEn}>{item.examples[0].english}</Text>
+                    </View>
+                  )}
                 </View>
               );
             })
@@ -275,10 +266,12 @@ const styles = StyleSheet.create({
     color: theme.colors.text.primary,
     fontSize: theme.typography.sizes.body,
   },
+  filterScroll: {
+    marginBottom: theme.spacing.lg,
+  },
   filterRow: {
     flexDirection: 'row',
     gap: theme.spacing.sm,
-    marginBottom: theme.spacing.lg,
   },
   filterPill: {
     paddingHorizontal: theme.spacing.md,
@@ -303,6 +296,10 @@ const styles = StyleSheet.create({
   },
   listContainer: {
     gap: theme.spacing.md,
+  },
+  loadingContainer: {
+    paddingVertical: 40,
+    alignItems: 'center',
   },
   wordCard: {
     backgroundColor: theme.colors.background.card,
@@ -385,9 +382,16 @@ const styles = StyleSheet.create({
     borderLeftColor: theme.colors.brand.primary,
     marginTop: theme.spacing.xs,
   },
+  exampleHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
   exampleJa: {
     fontSize: theme.typography.sizes.bodySm,
     color: theme.colors.text.secondary,
+    flex: 1,
+    paddingRight: theme.spacing.xs,
   },
   exampleEn: {
     fontSize: theme.typography.sizes.caption,

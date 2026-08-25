@@ -725,3 +725,13 @@ export function getMockLesson(level: JLPTLevel, topic?: string): DailyLesson {
     isStarred: false,
   };
 }
+
+export const geminiService = {
+  generateLesson,
+  generateDailyLesson: (topic: string, level: JLPTLevel, apiKey?: string) =>
+    generateLesson({ topic, level, apiKey }),
+  validateApiKey,
+  buildPrompt,
+  getMockLesson,
+};
+

@@ -23,33 +23,40 @@ export class NativeExpoSpeechProvider implements AudioProvider {
    */
   async playSentence(
     text: string,
-    sentenceIndex: number,
+    sentenceIndexOrOptions?: number | PlaybackOptions,
     options?: PlaybackOptions
   ): Promise<void> {
+    const sentenceIndex =
+      typeof sentenceIndexOrOptions === 'number' ? sentenceIndexOrOptions : 0;
+    const opts =
+      typeof sentenceIndexOrOptions === 'object'
+        ? sentenceIndexOrOptions
+        : options;
+
     await Speech.stop();
     this.isCancelled = false;
     this.isPlayingPassage = false;
 
     Speech.speak(text, {
       language: 'ja-JP',
-      rate: options?.rate ?? 1.0,
-      voice: options?.voiceId,
+      rate: opts?.rate ?? 1.0,
+      voice: opts?.voiceId,
       onStart: () => {
         if (!this.isCancelled) {
-          options?.onSentenceStart?.(sentenceIndex);
+          opts?.onSentenceStart?.(sentenceIndex);
         }
       },
       onDone: () => {
         if (!this.isCancelled) {
-          options?.onSentenceEnd?.(sentenceIndex);
-          options?.onFinished?.();
+          opts?.onSentenceEnd?.(sentenceIndex);
+          opts?.onFinished?.();
         }
       },
       onStopped: () => {
         // stopped
       },
       onError: (err: any) => {
-        options?.onError?.(
+        opts?.onError?.(
           err instanceof Error ? err : new Error(String(err))
         );
       },
@@ -173,3 +180,4 @@ export class NativeExpoSpeechProvider implements AudioProvider {
 }
 
 export const defaultAudioProvider = new NativeExpoSpeechProvider();
+export const audioProvider = defaultAudioProvider;

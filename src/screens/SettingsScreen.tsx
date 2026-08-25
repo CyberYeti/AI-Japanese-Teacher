@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,7 @@ import {
 import { theme } from '../theme';
 import { JLPTLevel } from '../types/domain';
 import { Ionicons } from '@expo/vector-icons';
+import { storageService, geminiService } from '../services';
 
 const SPEEDS = [0.75, 1.0, 1.25];
 const FURIGANA_MODES = [
@@ -30,19 +31,77 @@ export const SettingsScreen: React.FC = () => {
   const [englishSubtitles, setEnglishSubtitles] = useState(true);
   const [isTestingKey, setIsTestingKey] = useState(false);
   const [keyStatus, setKeyStatus] = useState<'idle' | 'valid' | 'invalid'>('idle');
+  const [storageStats, setStorageStats] = useState({
+    lessonCount: 0,
+    starredCount: 0,
+    wordBankCount: 0,
+  });
 
-  const handleTestKey = () => {
+  useEffect(() => {
+    const loadSettings = async () => {
+      try {
+        const key = await storageService.getApiKey();
+        if (key) setApiKey(key);
+
+        const settings = await storageService.getUserSettings();
+        if (settings.ttsPlaybackRate) setSelectedSpeed(settings.ttsPlaybackRate);
+        if (settings.defaultJlptLevel) setDefaultLevel(settings.defaultJlptLevel);
+        if (settings.furiganaMode) setFuriganaMode(settings.furiganaMode);
+        if (typeof settings.englishSubtitles === 'boolean') {
+          setEnglishSubtitles(settings.englishSubtitles);
+        }
+
+        const stats = await storageService.getStorageStats();
+        setStorageStats(stats);
+      } catch (err) {
+        // fallback
+      }
+    };
+    loadSettings();
+  }, []);
+
+  const handleTestKey = async () => {
     if (!apiKey.trim()) {
       Alert.alert('Missing Key', 'Please enter a Gemini API key first.');
       return;
     }
     setIsTestingKey(true);
-    // Simulate validation
-    setTimeout(() => {
+    try {
+      const isValid = await geminiService.validateApiKey(apiKey.trim());
       setIsTestingKey(false);
-      setKeyStatus('valid');
-      Alert.alert('Connection Successful', 'Gemini API key verified successfully!');
-    }, 800);
+      if (isValid) {
+        setKeyStatus('valid');
+        await storageService.saveApiKey(apiKey.trim());
+        Alert.alert('Connection Successful', 'Gemini API key verified successfully!');
+      } else {
+        setKeyStatus('invalid');
+        Alert.alert('Connection Failed', 'The provided Gemini API key could not be verified.');
+      }
+    } catch {
+      setIsTestingKey(false);
+      setKeyStatus('invalid');
+      Alert.alert('Error', 'Failed to test Gemini API connection.');
+    }
+  };
+
+  const handleSaveLevel = async (level: JLPTLevel) => {
+    setDefaultLevel(level);
+    await storageService.saveUserSettings({ defaultJlptLevel: level });
+  };
+
+  const handleSaveSpeed = async (speed: number) => {
+    setSelectedSpeed(speed);
+    await storageService.saveUserSettings({ ttsPlaybackRate: speed });
+  };
+
+  const handleSaveFurigana = async (mode: 'all' | 'target-only' | 'hidden') => {
+    setFuriganaMode(mode);
+    await storageService.saveUserSettings({ furiganaMode: mode });
+  };
+
+  const handleSaveSubtitles = async (val: boolean) => {
+    setEnglishSubtitles(val);
+    await storageService.saveUserSettings({ englishSubtitles: val });
   };
 
   const handleClearCache = () => {
@@ -51,7 +110,42 @@ export const SettingsScreen: React.FC = () => {
       'This will remove all non-starred lessons from local cache. Word Bank and starred lessons will remain intact.',
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Clear', style: 'destructive', onPress: () => Alert.alert('Cleared', 'Cache cleared.') },
+        {
+          text: 'Clear',
+          style: 'destructive',
+          onPress: async () => {
+            const lessons = await storageService.getLessons();
+            for (const l of lessons) {
+              if (!l.isStarred) {
+                await storageService.deleteLesson(l.id);
+              }
+            }
+            const stats = await storageService.getStorageStats();
+            setStorageStats(stats);
+            Alert.alert('Cleared', 'Un-starred lesson cache cleared.');
+          },
+        },
+      ]
+    );
+  };
+
+  const handleClearAllData = () => {
+    Alert.alert(
+      'Reset All Application Data?',
+      'This will permanently delete all lessons, Word Bank words, and preferences. This action cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Reset Everything',
+          style: 'destructive',
+          onPress: async () => {
+            await storageService.clearAllData();
+            setApiKey('');
+            setKeyStatus('idle');
+            setStorageStats({ lessonCount: 0, starredCount: 0, wordBankCount: 0 });
+            Alert.alert('Reset Complete', 'All local data has been reset.');
+          },
+        },
       ]
     );
   };
@@ -134,12 +228,14 @@ export const SettingsScreen: React.FC = () => {
               return (
                 <TouchableOpacity
                   key={speed}
-                  onPress={() => setSelectedSpeed(speed)}
+                  onPress={() => handleSaveSpeed(speed)}
                   style={[styles.speedButton, isSelected && styles.speedButtonActive]}
                   activeOpacity={0.7}
+                  testID={`settings-speed-${speed}`}
                 >
                   <Text style={[styles.speedButtonText, isSelected && styles.speedButtonTextActive]}>
-                    {speed}x {speed === 0.75 ? '(Learner)' : speed === 1.0 ? '(Normal)' : '(Fast)'}
+                    {speed === 1 ? '1.0' : speed}x{' '}
+                    {speed === 0.75 ? '(Learner)' : speed === 1.0 ? '(Normal)' : '(Fast)'}
                   </Text>
                 </TouchableOpacity>
               );
@@ -163,7 +259,7 @@ export const SettingsScreen: React.FC = () => {
               return (
                 <TouchableOpacity
                   key={level}
-                  onPress={() => setDefaultLevel(level)}
+                  onPress={() => handleSaveLevel(level)}
                   style={[
                     styles.levelPill,
                     isSelected && {
@@ -173,6 +269,7 @@ export const SettingsScreen: React.FC = () => {
                     },
                   ]}
                   activeOpacity={0.7}
+                  testID={`settings-level-${level}`}
                 >
                   <Text
                     style={[
@@ -195,9 +292,10 @@ export const SettingsScreen: React.FC = () => {
               return (
                 <TouchableOpacity
                   key={mode.id}
-                  onPress={() => setFuriganaMode(mode.id)}
+                  onPress={() => handleSaveFurigana(mode.id)}
                   style={[styles.modeCard, isSelected && styles.modeCardActive]}
                   activeOpacity={0.7}
+                  testID={`settings-furigana-${mode.id}`}
                 >
                   <Text style={[styles.modeTitle, isSelected && styles.modeTitleActive]}>
                     {mode.label}
@@ -216,7 +314,7 @@ export const SettingsScreen: React.FC = () => {
             </View>
             <Switch
               value={englishSubtitles}
-              onValueChange={setEnglishSubtitles}
+              onValueChange={handleSaveSubtitles}
               trackColor={{ false: theme.colors.background.secondary, true: theme.colors.brand.primary }}
               thumbColor="#ffffff"
             />
@@ -233,10 +331,29 @@ export const SettingsScreen: React.FC = () => {
             FIFO Policy: Un-starred lessons auto-rotate after 25 lessons. Starred lessons and Word Bank are permanently preserved.
           </Text>
 
-          <TouchableOpacity style={styles.dangerButton} onPress={handleClearCache} activeOpacity={0.7}>
-            <Ionicons name="trash-outline" size={16} color={theme.colors.ui.error} style={{ marginRight: 6 }} />
-            <Text style={styles.dangerButtonText}>Clear Un-Starred Lesson Cache</Text>
-          </TouchableOpacity>
+          {/* Storage Statistics Summary */}
+          <View style={styles.statsBox}>
+            <Ionicons name="pie-chart-outline" size={16} color={theme.colors.brand.light} />
+            <Text style={styles.statsText}>
+              {storageStats.lessonCount} Lessons ({storageStats.starredCount} ⭐ Starred) · {storageStats.wordBankCount} Word Bank Items
+            </Text>
+          </View>
+
+          <View style={styles.storageActions}>
+            <TouchableOpacity style={styles.dangerButton} onPress={handleClearCache} activeOpacity={0.7}>
+              <Ionicons name="trash-outline" size={16} color={theme.colors.ui.error} style={{ marginRight: 6 }} />
+              <Text style={styles.dangerButtonText}>Clear Un-Starred Lesson Cache</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.dangerButton, { backgroundColor: 'rgba(239, 68, 68, 0.05)', marginTop: 8 }]}
+              onPress={handleClearAllData}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="warning-outline" size={16} color={theme.colors.ui.error} style={{ marginRight: 6 }} />
+              <Text style={styles.dangerButtonText}>Reset All Application Data</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* About App */}
@@ -431,6 +548,25 @@ const styles = StyleSheet.create({
     fontSize: theme.typography.sizes.caption,
     color: theme.colors.text.muted,
     marginTop: 2,
+  },
+  statsBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.sm,
+    backgroundColor: 'rgba(15, 23, 42, 0.6)',
+    borderRadius: theme.borderRadius.md,
+    padding: theme.spacing.sm + 2,
+    marginBottom: theme.spacing.md,
+    borderWidth: 1,
+    borderColor: theme.colors.background.cardBorder,
+  },
+  statsText: {
+    fontSize: theme.typography.sizes.caption,
+    color: theme.colors.text.secondary,
+    fontWeight: theme.typography.weights.medium,
+  },
+  storageActions: {
+    gap: theme.spacing.xs,
   },
   dangerButton: {
     flexDirection: 'row',

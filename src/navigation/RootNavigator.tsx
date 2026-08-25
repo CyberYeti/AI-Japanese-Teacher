@@ -1,16 +1,19 @@
 import React from 'react';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
-import { RootTabParamList } from '../types/navigation';
+import { RootStackParamList, RootTabParamList } from '../types/navigation';
 import { LearnScreen } from '../screens/LearnScreen';
 import { HistoryScreen } from '../screens/HistoryScreen';
 import { WordBankScreen } from '../screens/WordBankScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
+import { LessonStudyScreen } from '../screens/LessonStudyScreen';
 import { theme } from '../theme';
 
 const Tab = createBottomTabNavigator<RootTabParamList>();
+const Stack = createNativeStackNavigator<RootStackParamList>();
 
-export const RootNavigator: React.FC = () => {
+export const MainTabs: React.FC = () => {
   return (
     <Tab.Navigator
       initialRouteName="Learn"
@@ -73,5 +76,20 @@ export const RootNavigator: React.FC = () => {
         }}
       />
     </Tab.Navigator>
+  );
+};
+
+export const RootNavigator: React.FC = () => {
+  return (
+    <Stack.Navigator
+      initialRouteName="MainTabs"
+      screenOptions={{
+        headerShown: false,
+        contentStyle: { backgroundColor: theme.colors.background.primary },
+      }}
+    >
+      <Stack.Screen name="MainTabs" component={MainTabs} />
+      <Stack.Screen name="LessonStudy" component={LessonStudyScreen} />
+    </Stack.Navigator>
   );
 };

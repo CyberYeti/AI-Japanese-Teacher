@@ -52,12 +52,20 @@ export interface DailyLesson {
   id: string; // Unique ID (e.g. UUID or timestamp)
   createdAt: string; // ISO 8601 string
   topic: string; // e.g. "Ordering at a café"
+  topicEnglish?: string;
+  topicJapanese?: string;
   level: JLPTLevel;
   themeDescription: string;
   targetVocabulary: TargetWord[];
   title: string;
   titleTokens: SentenceToken[];
   sentences: PassageSentence[];
+  passage?: {
+    title: string;
+    titleEnglish?: string;
+    speakers?: SpeakerInfo[];
+    sentences: PassageSentence[];
+  };
   isStarred: boolean;
 }
 
