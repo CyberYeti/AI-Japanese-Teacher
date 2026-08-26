@@ -55,8 +55,9 @@ export interface GenerateLessonOptions {
   model?: string;
 }
 
-const DEFAULT_MODEL = 'gemini-2.0-flash';
-const FALLBACK_MODELS = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-flash-latest'];
+const DEFAULT_MODEL = 'gemini-3.5-flash-lite';
+const FALLBACK_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.6-flash', 'gemini-3.7-flash', 'gemini-3.5-flash'];
+// const FALLBACK_MODELS = ['gemini-3.7-flash'];
 const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
 
 /**
@@ -243,10 +244,10 @@ export function parseAndValidateLessonResponse(
     partOfSpeech: String(v.partOfSpeech || 'word'),
     examples: Array.isArray(v.examples)
       ? v.examples.map((ex: any) => ({
-          japanese: String(ex.japanese || ''),
-          reading: String(ex.reading || ''),
-          english: String(ex.english || ''),
-        }))
+        japanese: String(ex.japanese || ''),
+        reading: String(ex.reading || ''),
+        english: String(ex.english || ''),
+      }))
       : [],
   }));
 
@@ -259,20 +260,20 @@ export function parseAndValidateLessonResponse(
       english: String(s.english || ''),
       tokens: Array.isArray(s.tokens)
         ? s.tokens.map((t: any) => ({
-            surface: String(t.surface || ''),
-            reading: String(t.reading || ''),
-            isTarget: Boolean(t.isTarget),
-          }))
+          surface: String(t.surface || ''),
+          reading: String(t.reading || ''),
+          isTarget: Boolean(t.isTarget),
+        }))
         : [{ surface: String(s.japanese || ''), reading: '', isTarget: false }],
     })
   );
 
   const validatedTitleTokens: SentenceToken[] = Array.isArray(parsed.titleTokens)
     ? parsed.titleTokens.map((t: any) => ({
-        surface: String(t.surface || ''),
-        reading: String(t.reading || ''),
-        isTarget: Boolean(t.isTarget),
-      }))
+      surface: String(t.surface || ''),
+      reading: String(t.reading || ''),
+      isTarget: Boolean(t.isTarget),
+    }))
     : [{ surface: String(parsed.title || metadata.topic), reading: '', isTarget: false }];
 
   const now = new Date().toISOString();
@@ -410,8 +411,7 @@ export async function generateLesson(
       }
 
       throw new GeminiApiError(
-        `Gemini API request failed with status ${response.status}: ${
-          errorData?.error?.message || response.statusText
+        `Gemini API request failed with status ${response.status}: ${errorData?.error?.message || response.statusText
         }`,
         response.status,
         errorData
