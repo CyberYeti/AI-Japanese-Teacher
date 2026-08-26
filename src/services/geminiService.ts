@@ -55,7 +55,8 @@ export interface GenerateLessonOptions {
   model?: string;
 }
 
-const DEFAULT_MODEL = 'gemini-2.5-flash';
+const DEFAULT_MODEL = 'gemini-2.0-flash';
+const FALLBACK_MODELS = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-flash-latest'];
 const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
 
 /**
@@ -340,78 +341,95 @@ export async function generateLesson(
   const promptText = buildPrompt(level, topic, customInstruction);
   const responseSchema = buildResponseSchema();
 
-  const url = `${GEMINI_BASE_URL}/${model}:generateContent?key=${encodeURIComponent(
-    apiKey.trim()
-  )}`;
+  const modelsToTry = [model, ...FALLBACK_MODELS.filter((m) => m !== model)];
+  let lastError: Error | null = null;
 
-  const requestBody = {
-    contents: [
-      {
-        parts: [{ text: promptText }],
+  for (const currentModel of modelsToTry) {
+    const url = `${GEMINI_BASE_URL}/${currentModel}:generateContent?key=${encodeURIComponent(
+      apiKey.trim()
+    )}`;
+
+    const requestBody = {
+      contents: [
+        {
+          parts: [{ text: promptText }],
+        },
+      ],
+      generationConfig: {
+        temperature: 0.7,
+        responseMimeType: 'application/json',
+        responseSchema: responseSchema,
       },
-    ],
-    generationConfig: {
-      temperature: 0.7,
-      responseMimeType: 'application/json',
-      responseSchema: responseSchema,
-    },
-  };
+    };
 
-  let response: Response;
-  try {
-    response = await fetchFn(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody),
-    });
-  } catch (err: any) {
-    throw new GeminiApiError(`Network request to Gemini API failed: ${err.message}`);
-  }
-
-  if (!response.ok) {
-    let errorData: any = {};
+    let response: Response;
     try {
-      errorData = await response.json();
-    } catch {
-      // ignore
+      response = await fetchFn(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+    } catch (err: any) {
+      throw new GeminiApiError(`Network request to Gemini API failed: ${err.message}`);
     }
 
-    if (response.status === 400 || response.status === 403) {
-      const msg = errorData?.error?.message || 'Invalid Gemini API key.';
-      if (
-        msg.includes('API_KEY_INVALID') ||
-        msg.includes('API key') ||
-        response.status === 403
-      ) {
-        throw new InvalidApiKeyError(msg);
+    if (!response.ok) {
+      let errorData: any = {};
+      try {
+        errorData = await response.json();
+      } catch {
+        // ignore
       }
-      throw new GeminiApiError(`Gemini API error (400): ${msg}`, 400, errorData);
-    }
 
-    if (response.status === 429) {
-      throw new RateLimitError(
-        errorData?.error?.message || 'Gemini API rate limit exceeded.'
+      // If model not found (404), try next model in fallback list
+      if (response.status === 404) {
+        lastError = new GeminiApiError(
+          `Gemini model ${currentModel} not found (404).`,
+          404,
+          errorData
+        );
+        continue;
+      }
+
+      if (response.status === 400 || response.status === 403) {
+        const msg = errorData?.error?.message || 'Invalid Gemini API key.';
+        if (
+          msg.includes('API_KEY_INVALID') ||
+          msg.includes('API key') ||
+          response.status === 403
+        ) {
+          throw new InvalidApiKeyError(msg);
+        }
+        throw new GeminiApiError(`Gemini API error (400): ${msg}`, 400, errorData);
+      }
+
+      if (response.status === 429) {
+        throw new RateLimitError(
+          errorData?.error?.message || 'Gemini API rate limit exceeded.'
+        );
+      }
+
+      throw new GeminiApiError(
+        `Gemini API request failed with status ${response.status}: ${
+          errorData?.error?.message || response.statusText
+        }`,
+        response.status,
+        errorData
       );
     }
 
-    throw new GeminiApiError(
-      `Gemini API request failed with status ${response.status}: ${
-        errorData?.error?.message || response.statusText
-      }`,
-      response.status,
-      errorData
-    );
+    const jsonResponse: any = await response.json();
+    const textContent =
+      jsonResponse?.candidates?.[0]?.content?.parts?.[0]?.text;
+
+    if (!textContent) {
+      throw new GeminiParseError('Gemini API returned an empty response.', jsonResponse);
+    }
+
+    return parseAndValidateLessonResponse(textContent, { topic, level });
   }
 
-  const jsonResponse: any = await response.json();
-  const textContent =
-    jsonResponse?.candidates?.[0]?.content?.parts?.[0]?.text;
-
-  if (!textContent) {
-    throw new GeminiParseError('Gemini API returned an empty response.', jsonResponse);
-  }
-
-  return parseAndValidateLessonResponse(textContent, { topic, level });
+  throw lastError || new GeminiApiError('Failed to generate lesson with available Gemini models.');
 }
 
 /**
