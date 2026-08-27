@@ -6,25 +6,45 @@ import {
   ScrollView,
   TouchableOpacity,
   StatusBar,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types/navigation';
+import { DailyLesson, FuriganaMode, SentenceToken, TargetWord } from '../types/domain';
 import { theme } from '../theme';
 import { Ionicons } from '@expo/vector-icons';
-import { FuriganaText, FuriganaMode } from '../components/FuriganaText';
+import { FuriganaText } from '../components/FuriganaText';
 import { AudioPlayerBar } from '../components/AudioPlayerBar';
-import { audioProvider, storageService } from '../services';
+import { WordTooltipModal } from '../components/WordTooltipModal';
+import { audioProvider, storageService, geminiService } from '../services';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'LessonStudy'>;
 
 export const LessonStudyScreen: React.FC<Props> = ({ route, navigation }) => {
-  const { lesson, initialScreen = 'vocab' } = route.params;
+  const {
+    lesson: initialLesson,
+    initialScreen = 'vocab',
+    isPassagePending = false,
+    isPracticePassage = false,
+  } = route.params;
 
+  const [currentLesson, setCurrentLesson] = useState<DailyLesson>(initialLesson);
   const [activeTab, setActiveTab] = useState<'vocab' | 'dialogue'>(initialScreen);
-  const [furiganaMode, setFuriganaMode] = useState<FuriganaMode>('all');
+  const [furiganaMode, setFuriganaMode] = useState<FuriganaMode>(isPracticePassage ? 'hidden' : 'all');
   const [showTranslations, setShowTranslations] = useState(true);
-  const [isStarred, setIsStarred] = useState(lesson.isStarred ?? false);
+  const [isStarred, setIsStarred] = useState(initialLesson.isStarred ?? false);
+
+  // Word Tooltip state for highlighted words
+  const [selectedWord, setSelectedWord] = useState<TargetWord | null>(null);
+  const [isTooltipVisible, setIsTooltipVisible] = useState(false);
+
+  // Two-phase background passage generation state
+  const [isPassageLoading, setIsPassageLoading] = useState<boolean>(
+    Boolean(isPassagePending && (!initialLesson.sentences || initialLesson.sentences.length === 0))
+  );
+  const [passageError, setPassageError] = useState<string | null>(null);
+  const [isCelebrationVisible, setIsCelebrationVisible] = useState(false);
 
   // Audio playback state
   const [isPlaying, setIsPlaying] = useState(false);
@@ -33,16 +53,75 @@ export const LessonStudyScreen: React.FC<Props> = ({ route, navigation }) => {
   const [isLooping, setIsLooping] = useState(false);
   const [activeSentenceId, setActiveSentenceId] = useState<number | null>(null);
 
-  const sentences = lesson.passage?.sentences || lesson.sentences || [];
+  const sentences = currentLesson.passage?.sentences || currentLesson.sentences || [];
   const totalSentences = sentences.length;
-  const topicEnglish = lesson.topicEnglish || lesson.topic || 'Daily Lesson';
-  const topicJapanese = lesson.topicJapanese || lesson.title || '';
+  const topicEnglish = currentLesson.topicEnglish || currentLesson.topic || 'Daily Lesson';
+  const topicJapanese = currentLesson.topicJapanese || currentLesson.title || '';
+
+  const fetchPassage = async () => {
+    setIsPassageLoading(true);
+    setPassageError(null);
+    try {
+      const apiKey = (await storageService.getApiKey()) || undefined;
+
+      // Sample review words from cumulative Word Bank to recycle older vocabulary
+      const candidateReviewWords = await storageService.getWordsForPractice(4, currentLesson.level);
+      const targetSurfaces = new Set((currentLesson.targetVocabulary || []).map((v) => v.word));
+      const reviewWords: TargetWord[] = candidateReviewWords
+        .filter((w) => !targetSurfaces.has(w.word))
+        .map((w) => ({
+          word: w.word,
+          reading: w.reading,
+          romaji: w.romaji,
+          meaning: w.meaning,
+          partOfSpeech: w.partOfSpeech,
+          examples: w.examples,
+        }));
+
+      const passageResult = await geminiService.generatePassageForVocabulary(
+        currentLesson.targetVocabulary,
+        currentLesson.topic,
+        currentLesson.level,
+        apiKey,
+        undefined,
+        reviewWords
+      );
+
+      const updatedLesson: DailyLesson = {
+        ...currentLesson,
+        sentences: passageResult.sentences,
+        passage: {
+          title: currentLesson.title,
+          speakers: passageResult.speakers,
+          sentences: passageResult.sentences,
+        },
+      };
+
+      setCurrentLesson(updatedLesson);
+      await storageService.saveLesson(updatedLesson);
+      setIsPassageLoading(false);
+    } catch (err: any) {
+      setIsPassageLoading(false);
+      setPassageError(err?.message || 'Failed to generate dialogue passage.');
+    }
+  };
+
+  useEffect(() => {
+    // If passage is pending or sentences are empty, fetch in background
+    if (isPassagePending && (!currentLesson.sentences || currentLesson.sentences.length === 0)) {
+      fetchPassage();
+    }
+  }, []);
 
   useEffect(() => {
     // Load initial user settings for rate & furigana mode if available
     storageService.getUserSettings().then((settings) => {
       if (settings.ttsPlaybackRate) setSpeechRate(settings.ttsPlaybackRate);
-      if (settings.furiganaMode) setFuriganaMode(settings.furiganaMode);
+      if (isPracticePassage) {
+        setFuriganaMode('hidden');
+      } else if (settings.furiganaMode) {
+        setFuriganaMode(settings.furiganaMode);
+      }
       if (typeof settings.englishSubtitles === 'boolean') {
         setShowTranslations(settings.englishSubtitles);
       }
@@ -56,22 +135,110 @@ export const LessonStudyScreen: React.FC<Props> = ({ route, navigation }) => {
   const handleToggleStar = async () => {
     const nextState = !isStarred;
     setIsStarred(nextState);
-    await storageService.toggleLessonStar(lesson.id);
+    await storageService.toggleLessonStar(currentLesson.id);
   };
 
   const handlePlayWord = async (text: string) => {
     await audioProvider.playSentence(text, { rate: speechRate });
   };
 
-  const handlePlaySentence = async (sentenceId: number, text: string) => {
+  const handleTokenPress = async (token: SentenceToken) => {
+    if (!token.isTarget) return;
+
+    // 1. Try finding in currentLesson.targetVocabulary
+    const targetVocab = currentLesson.targetVocabulary || [];
+    const directMatch = targetVocab.find(
+      (v) => v.word === token.surface || (token.reading && v.reading === token.reading)
+    );
+    if (directMatch) {
+      setSelectedWord(directMatch);
+      setIsTooltipVisible(true);
+      return;
+    }
+
+    const partialMatch = targetVocab.find(
+      (v) => token.surface.includes(v.word) || v.word.includes(token.surface)
+    );
+    if (partialMatch) {
+      setSelectedWord(partialMatch);
+      setIsTooltipVisible(true);
+      return;
+    }
+
+    // 2. Try finding in Word Bank (for practice passages or recycled review words)
+    try {
+      const wordBank = await storageService.getWordBank();
+      const bankMatch = wordBank.find(
+        (w) =>
+          w.word === token.surface ||
+          (token.reading && w.reading === token.reading) ||
+          token.surface.includes(w.word) ||
+          w.word.includes(token.surface)
+      );
+      if (bankMatch) {
+        setSelectedWord({
+          word: bankMatch.word,
+          reading: bankMatch.reading,
+          romaji: bankMatch.romaji,
+          meaning: bankMatch.meaning,
+          partOfSpeech: bankMatch.partOfSpeech,
+          examples: bankMatch.examples,
+        });
+        setIsTooltipVisible(true);
+        return;
+      }
+    } catch {
+      // ignore
+    }
+
+    // 3. Fallback construct from token info
+    setSelectedWord({
+      word: token.surface,
+      reading: token.reading || token.surface,
+      romaji: '',
+      meaning: 'Target vocabulary item',
+      partOfSpeech: 'word',
+    });
+    setIsTooltipVisible(true);
+  };
+
+  const isLoopingRef = useRef(isLooping);
+  const loopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    isLoopingRef.current = isLooping;
+    if (!isLooping && loopTimerRef.current) {
+      clearTimeout(loopTimerRef.current);
+      loopTimerRef.current = null;
+    }
+  }, [isLooping]);
+
+  const handleCloseTooltip = () => {
+    setIsTooltipVisible(false);
+    setSelectedWord(null);
+  };
+
+  const playSentenceInLoop = async (sentenceId: number, text: string) => {
     setActiveSentenceId(sentenceId);
     setCurrentSentenceIndex(sentenceId);
     setIsPlaying(true);
     await audioProvider.playSentence(text, {
       rate: speechRate,
       onFinished: () => {
-        setIsPlaying(false);
-        setActiveSentenceId(null);
+        if (isLoopingRef.current) {
+          if (loopTimerRef.current) clearTimeout(loopTimerRef.current);
+          loopTimerRef.current = setTimeout(() => {
+            if (isLoopingRef.current) {
+              playSentenceInLoop(sentenceId, text);
+            } else {
+              setIsPlaying(false);
+              setActiveSentenceId(null);
+            }
+          }, 300);
+        } else {
+          setIsPlaying(false);
+          setActiveSentenceId(null);
+        }
       },
       onError: () => {
         setIsPlaying(false);
@@ -80,7 +247,20 @@ export const LessonStudyScreen: React.FC<Props> = ({ route, navigation }) => {
     });
   };
 
+  const handlePlaySentence = async (sentenceId: number, text: string) => {
+    if (loopTimerRef.current) {
+      clearTimeout(loopTimerRef.current);
+      loopTimerRef.current = null;
+    }
+    await playSentenceInLoop(sentenceId, text);
+  };
+
   const handleToggleFullPlay = async () => {
+    if (loopTimerRef.current) {
+      clearTimeout(loopTimerRef.current);
+      loopTimerRef.current = null;
+    }
+
     if (isPlaying) {
       await audioProvider.stop();
       setIsPlaying(false);
@@ -90,16 +270,7 @@ export const LessonStudyScreen: React.FC<Props> = ({ route, navigation }) => {
       if (isLooping) {
         const sentence = sentences[currentSentenceIndex - 1] || sentences[0];
         if (sentence) {
-          setActiveSentenceId(sentence.id);
-          await audioProvider.playSentence(sentence.japanese, {
-            rate: speechRate,
-            onFinished: () => {
-              // Re-play if still looping
-              if (isLooping) {
-                handlePlaySentence(sentence.id, sentence.japanese);
-              }
-            },
-          });
+          await playSentenceInLoop(sentence.id, sentence.japanese);
         }
       } else {
         const sentenceTexts = sentences.map((s) => s.japanese);
@@ -125,10 +296,10 @@ export const LessonStudyScreen: React.FC<Props> = ({ route, navigation }) => {
   const handleToggleLoop = () => {
     const nextLoop = !isLooping;
     setIsLooping(nextLoop);
-    if (isPlaying) {
-      // Restart with or without loop
-      audioProvider.stop();
-      setIsPlaying(false);
+    isLoopingRef.current = nextLoop;
+    if (!nextLoop && loopTimerRef.current) {
+      clearTimeout(loopTimerRef.current);
+      loopTimerRef.current = null;
     }
   };
 
@@ -136,7 +307,27 @@ export const LessonStudyScreen: React.FC<Props> = ({ route, navigation }) => {
     setSpeechRate(rate);
   };
 
-  const levelColor = theme.colors.jlpt[lesson.level] || theme.colors.jlpt.N5;
+  const handleLessonComplete = async () => {
+    setIsCelebrationVisible(true);
+    // Force-save lesson state
+    await storageService.saveLesson(currentLesson);
+    // Record word practice frequency & recency
+    const wordsPracticed = (currentLesson.targetVocabulary || []).map((w) => w.word);
+    if (wordsPracticed.length > 0) {
+      await storageService.recordWordPractice(wordsPracticed);
+    }
+    setTimeout(() => {
+      if (navigation && typeof navigation.canGoBack === 'function' && navigation.canGoBack()) {
+        navigation.goBack();
+      } else if (navigation && typeof navigation.goBack === 'function') {
+        navigation.goBack();
+      } else if (navigation && typeof navigation.navigate === 'function') {
+        navigation.navigate('MainTabs', { screen: 'Learn' });
+      }
+    }, 800);
+  };
+
+  const levelColor = theme.colors.jlpt[currentLesson.level] || theme.colors.jlpt.N5;
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -170,7 +361,7 @@ export const LessonStudyScreen: React.FC<Props> = ({ route, navigation }) => {
             ]}
           >
             <Text style={[styles.levelBadgeText, { color: levelColor.text }]}>
-              JLPT {lesson.level}
+              JLPT {currentLesson.level}
             </Text>
           </View>
           <TouchableOpacity
@@ -186,6 +377,19 @@ export const LessonStudyScreen: React.FC<Props> = ({ route, navigation }) => {
           </TouchableOpacity>
         </View>
       </View>
+
+      {/* Celebration Banner */}
+      {isCelebrationVisible && (
+        <View style={styles.celebrationBanner} testID="celebration-banner">
+          <Ionicons name="trophy" size={24} color="#f59e0b" style={{ marginRight: 10 }} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.celebrationTitle}>🎉 Lesson Complete!</Text>
+            <Text style={styles.celebrationSubtitle}>
+              Progress and vocabulary saved to your Word Bank.
+            </Text>
+          </View>
+        </View>
+      )}
 
       {/* 2-Screen Study View Switch Tabs */}
       <View style={styles.tabBarContainer}>
@@ -294,19 +498,19 @@ export const LessonStudyScreen: React.FC<Props> = ({ route, navigation }) => {
               <View>
                 <Text style={styles.sectionHeaderTitle}>Daily Target Words</Text>
                 <Text style={styles.sectionHeaderSubtitle}>
-                  Master these {lesson.targetVocabulary.length} words with 3 example sentences each:
+                  Master these {currentLesson.targetVocabulary.length} words with 3 example sentences each:
                 </Text>
               </View>
               <View style={styles.wordCountBadge}>
                 <Text style={styles.wordCountBadgeText}>
-                  {lesson.targetVocabulary.length} Words
+                  {currentLesson.targetVocabulary.length} Words
                 </Text>
               </View>
             </View>
 
             {/* Target Vocabulary Cards */}
             <View style={styles.vocabList}>
-              {lesson.targetVocabulary.map((item, index) => (
+              {currentLesson.targetVocabulary.map((item, index) => (
                 <View key={`vocab-${index}`} style={styles.vocabCard}>
                   {/* Word Top Bar */}
                   <View style={styles.vocabCardTop}>
@@ -320,7 +524,7 @@ export const LessonStudyScreen: React.FC<Props> = ({ route, navigation }) => {
                           ]}
                         >
                           <Text style={[styles.vocabLevelPillText, { color: levelColor.text }]}>
-                            {lesson.level}
+                            {currentLesson.level}
                           </Text>
                         </View>
                       </View>
@@ -386,6 +590,17 @@ export const LessonStudyScreen: React.FC<Props> = ({ route, navigation }) => {
                 Practice Conversation Roleplay →
               </Text>
             </TouchableOpacity>
+
+            {/* Lesson Complete Button on Vocab tab */}
+            <TouchableOpacity
+              style={styles.secondaryCompleteButton}
+              onPress={handleLessonComplete}
+              activeOpacity={0.8}
+              testID="lesson-complete-vocab-btn"
+            >
+              <Ionicons name="checkmark-circle-outline" size={18} color={theme.colors.brand.light} style={{ marginRight: 6 }} />
+              <Text style={styles.secondaryCompleteButtonText}>Mark Lesson Complete</Text>
+            </TouchableOpacity>
           </View>
         ) : (
           /* ========================================================
@@ -408,99 +623,162 @@ export const LessonStudyScreen: React.FC<Props> = ({ route, navigation }) => {
               </Text>
             </View>
 
-            {/* Dialogue Speech Bubbles */}
-            <View style={styles.dialogueList}>
-              {sentences.map((sent) => {
-                const isCurrent = activeSentenceId === sent.id;
-                const speaker = lesson.passage?.speakers?.find(
-                  (s) => s.name === sent.speaker || s.id === sent.speaker
-                );
-                const speakerColorScheme = speaker?.colorScheme ?? {
-                  badgeBg: 'rgba(59, 130, 246, 0.15)',
-                  badgeText: '#60a5fa',
-                  border: 'rgba(59, 130, 246, 0.3)',
-                };
+            {/* In-Flight Passage Generation State */}
+            {isPassageLoading ? (
+              <View style={styles.passageLoadingCard} testID="passage-loading-card">
+                <ActivityIndicator size="large" color={theme.colors.brand.primary} />
+                <Text style={styles.passageLoadingTitle}>Writing Conversation Dialogue...</Text>
+                <Text style={styles.passageLoadingSubtext}>
+                  Crafting authentic roleplay with your {currentLesson.targetVocabulary.length} target words
+                </Text>
+              </View>
+            ) : passageError ? (
+              <View style={styles.passageErrorCard} testID="passage-error-card">
+                <Ionicons name="alert-circle" size={32} color={theme.colors.ui.error} />
+                <Text style={styles.passageErrorTitle}>Dialogue Generation Failed</Text>
+                <Text style={styles.passageErrorText}>{passageError}</Text>
+                <TouchableOpacity
+                  style={styles.retryPassageBtn}
+                  onPress={fetchPassage}
+                  testID="retry-passage-btn"
+                >
+                  <Text style={styles.retryPassageBtnText}>🔄 Retry Dialogue Generation</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              /* Dialogue Speech Bubbles */
+              <View style={styles.dialogueList}>
+                {sentences.map((sent, index) => {
+                  const isCurrent = activeSentenceId === sent.id;
+                  const speakerIdUpper = (sent.speakerId || '').toUpperCase();
+                  const speakerNameLower = (sent.speaker || '').toLowerCase();
 
-                return (
-                  <View
-                    key={`sentence-${sent.id}`}
-                    style={[
-                      styles.dialogueBubble,
-                      isCurrent && styles.dialogueBubbleActive,
-                    ]}
-                  >
-                    {/* Speaker Header */}
-                    <View style={styles.bubbleHeader}>
-                      <View
-                        style={[
-                          styles.speakerBadge,
-                          {
-                            backgroundColor: speakerColorScheme.badgeBg,
-                            borderColor: speakerColorScheme.border,
-                          },
-                        ]}
-                      >
-                        <Text
+                  let speakerColorScheme = theme.colors.speakers.speakerA;
+                  if (speakerIdUpper === 'B' || speakerIdUpper === 'SPEAKERB') {
+                    speakerColorScheme = theme.colors.speakers.speakerB;
+                  } else if (
+                    speakerIdUpper === 'NARRATOR' ||
+                    speakerNameLower.includes('narrator') ||
+                    speakerNameLower.includes('解説')
+                  ) {
+                    speakerColorScheme = theme.colors.speakers.narrator;
+                  } else if (speakerIdUpper === 'A' || speakerIdUpper === 'SPEAKERA') {
+                    speakerColorScheme = theme.colors.speakers.speakerA;
+                  } else {
+                    speakerColorScheme =
+                      index % 2 === 0
+                        ? theme.colors.speakers.speakerA
+                        : theme.colors.speakers.speakerB;
+                  }
+
+                  return (
+                    <View
+                      key={`sentence-${sent.id}`}
+                      style={[
+                        styles.dialogueBubble,
+                        {
+                          backgroundColor: isCurrent
+                            ? 'rgba(225, 29, 72, 0.12)'
+                            : speakerColorScheme.bubbleBg,
+                          borderColor: isCurrent
+                            ? theme.colors.brand.primary
+                            : speakerColorScheme.border,
+                        },
+                        isCurrent && styles.dialogueBubbleActive,
+                      ]}
+                      testID={`dialogue-bubble-${sent.id}`}
+                    >
+                      {/* Speaker Header */}
+                      <View style={styles.bubbleHeader}>
+                        <View
                           style={[
-                            styles.speakerBadgeText,
-                            { color: speakerColorScheme.badgeText },
+                            styles.speakerBadge,
+                            {
+                              backgroundColor: speakerColorScheme.badgeBg,
+                              borderColor: speakerColorScheme.border,
+                            },
                           ]}
                         >
-                          {sent.speaker ?? 'Speaker'}
-                        </Text>
+                          <Text
+                            style={[
+                              styles.speakerBadgeText,
+                              { color: speakerColorScheme.badgeText },
+                            ]}
+                          >
+                            {sent.speaker ?? 'Speaker'}
+                          </Text>
+                        </View>
+
+                        <TouchableOpacity
+                          style={[
+                            styles.bubblePlayBtn,
+                            isCurrent && styles.bubblePlayBtnActive,
+                          ]}
+                          onPress={() => handlePlaySentence(sent.id, sent.japanese)}
+                          activeOpacity={0.7}
+                          testID={`play-sentence-${sent.id}`}
+                        >
+                          <Ionicons
+                            name={isCurrent ? 'volume-high' : 'volume-medium-outline'}
+                            size={16}
+                            color={isCurrent ? '#ffffff' : theme.colors.brand.light}
+                          />
+                        </TouchableOpacity>
                       </View>
 
-                      <TouchableOpacity
-                        style={[
-                          styles.bubblePlayBtn,
-                          isCurrent && styles.bubblePlayBtnActive,
-                        ]}
-                        onPress={() => handlePlaySentence(sent.id, sent.japanese)}
-                        activeOpacity={0.7}
-                        testID={`play-sentence-${sent.id}`}
-                      >
-                        <Ionicons
-                          name={isCurrent ? 'volume-high' : 'volume-medium-outline'}
-                          size={16}
-                          color={isCurrent ? '#ffffff' : theme.colors.brand.light}
-                        />
-                      </TouchableOpacity>
-                    </View>
+                      {/* Japanese Sentence with Furigana */}
+                      <View style={styles.sentenceTextContainer}>
+                        {sent.tokens && sent.tokens.length > 0 ? (
+                          <FuriganaText
+                            tokens={sent.tokens}
+                            mode={furiganaMode}
+                            fontSize={17}
+                            onPressToken={handleTokenPress}
+                          />
+                        ) : (
+                          <Text style={styles.plainSentenceJa}>{sent.japanese}</Text>
+                        )}
+                      </View>
 
-                    {/* Japanese Sentence with Furigana */}
-                    <View style={styles.sentenceTextContainer}>
-                      {sent.tokens && sent.tokens.length > 0 ? (
-                        <FuriganaText
-                          tokens={sent.tokens}
-                          mode={furiganaMode}
-                          fontSize={17}
-                        />
-                      ) : (
-                        <Text style={styles.plainSentenceJa}>{sent.japanese}</Text>
+                      {/* English Translation */}
+                      {showTranslations && (
+                        <View style={styles.englishSubBox}>
+                          <Text style={styles.englishSubText}>{sent.english}</Text>
+                        </View>
                       )}
                     </View>
+                  );
+                })}
+              </View>
+            )}
 
-                    {/* English Translation */}
-                    {showTranslations && (
-                      <View style={styles.englishSubBox}>
-                        <Text style={styles.englishSubText}>{sent.english}</Text>
-                      </View>
-                    )}
-                  </View>
-                );
-              })}
+            {/* Bottom Actions Section */}
+            <View style={styles.bottomActionSection}>
+              <TouchableOpacity
+                style={styles.completeButton}
+                onPress={handleLessonComplete}
+                activeOpacity={0.8}
+                testID="lesson-complete-btn"
+              >
+                <Ionicons
+                  name="checkmark-circle"
+                  size={20}
+                  color="#ffffff"
+                  style={{ marginRight: 8 }}
+                />
+                <Text style={styles.completeButtonText}>Lesson Complete</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.secondaryButton}
+                onPress={() => setActiveTab('vocab')}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.secondaryButtonText}>
+                  ← Back to Daily Target Words
+                </Text>
+              </TouchableOpacity>
             </View>
-
-            {/* Back to Vocab Button */}
-            <TouchableOpacity
-              style={styles.secondaryButton}
-              onPress={() => setActiveTab('vocab')}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.secondaryButtonText}>
-                ← Back to Daily Target Words
-              </Text>
-            </TouchableOpacity>
           </View>
         )}
       </ScrollView>
@@ -522,6 +800,14 @@ export const LessonStudyScreen: React.FC<Props> = ({ route, navigation }) => {
               : `Playing Sentence ${currentSentenceIndex} of ${totalSentences}`
             : 'Tap Play to Listen'
         }
+      />
+
+      {/* Word Tooltip Modal for Highlighted Words */}
+      <WordTooltipModal
+        visible={isTooltipVisible}
+        word={selectedWord}
+        onClose={handleCloseTooltip}
+        onPlayAudio={handlePlayWord}
       />
     </SafeAreaView>
   );
@@ -950,5 +1236,112 @@ const styles = StyleSheet.create({
     color: theme.colors.text.secondary,
     fontSize: theme.typography.sizes.bodySm,
     fontWeight: theme.typography.weights.semibold,
+  },
+  celebrationBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(245, 158, 11, 0.15)',
+    borderBottomWidth: 1,
+    borderBottomColor: '#f59e0b',
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: theme.spacing.sm,
+  },
+  celebrationTitle: {
+    fontSize: theme.typography.sizes.bodySm,
+    fontWeight: theme.typography.weights.bold,
+    color: '#fbbf24',
+  },
+  celebrationSubtitle: {
+    fontSize: theme.typography.sizes.caption,
+    color: theme.colors.text.secondary,
+  },
+  passageLoadingCard: {
+    backgroundColor: theme.colors.background.card,
+    borderRadius: theme.borderRadius.xl,
+    padding: theme.spacing.xl,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: theme.spacing.md,
+    borderWidth: 1,
+    borderColor: theme.colors.background.cardBorder,
+    marginVertical: theme.spacing.md,
+  },
+  passageLoadingTitle: {
+    fontSize: theme.typography.sizes.bodyLg,
+    fontWeight: theme.typography.weights.bold,
+    color: theme.colors.text.primary,
+    textAlign: 'center',
+  },
+  passageLoadingSubtext: {
+    fontSize: theme.typography.sizes.caption,
+    color: theme.colors.text.muted,
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  passageErrorCard: {
+    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+    borderRadius: theme.borderRadius.xl,
+    padding: theme.spacing.lg,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.3)',
+    gap: theme.spacing.sm,
+    marginVertical: theme.spacing.md,
+  },
+  passageErrorTitle: {
+    fontSize: theme.typography.sizes.bodyLg,
+    fontWeight: theme.typography.weights.bold,
+    color: theme.colors.ui.error,
+  },
+  passageErrorText: {
+    fontSize: theme.typography.sizes.caption,
+    color: theme.colors.text.secondary,
+    textAlign: 'center',
+  },
+  retryPassageBtn: {
+    backgroundColor: theme.colors.ui.error,
+    borderRadius: theme.borderRadius.md,
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: theme.spacing.sm,
+    marginTop: theme.spacing.xs,
+  },
+  retryPassageBtnText: {
+    color: '#ffffff',
+    fontSize: theme.typography.sizes.caption,
+    fontWeight: theme.typography.weights.bold,
+  },
+  bottomActionSection: {
+    marginTop: theme.spacing.md,
+    gap: theme.spacing.xs,
+  },
+  completeButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#059669',
+    borderRadius: theme.borderRadius.lg,
+    paddingVertical: theme.spacing.md,
+    ...theme.shadows.glow,
+  },
+  completeButtonText: {
+    color: '#ffffff',
+    fontSize: theme.typography.sizes.bodyLg,
+    fontWeight: theme.typography.weights.bold,
+  },
+  secondaryCompleteButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+    borderRadius: theme.borderRadius.lg,
+    paddingVertical: theme.spacing.md,
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.3)',
+    marginTop: theme.spacing.sm,
+  },
+  secondaryCompleteButtonText: {
+    color: '#34d399',
+    fontSize: theme.typography.sizes.bodySm,
+    fontWeight: theme.typography.weights.bold,
   },
 });

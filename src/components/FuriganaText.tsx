@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, TextStyle, ViewStyle } from 'react-native';
+import { View, Text, StyleSheet, TextStyle, ViewStyle, TouchableOpacity } from 'react-native';
 import { SentenceToken } from '../types/domain';
 import { theme } from '../theme';
 
@@ -14,6 +14,7 @@ export interface FuriganaTextProps {
   targetHighlightColor?: string;
   style?: ViewStyle;
   testID?: string;
+  onPressToken?: (token: SentenceToken) => void;
 }
 
 export const FuriganaText: React.FC<FuriganaTextProps> = ({
@@ -25,6 +26,7 @@ export const FuriganaText: React.FC<FuriganaTextProps> = ({
   targetHighlightColor = theme.colors.brand.light,
   style,
   testID,
+  onPressToken,
 }) => {
   const readingFontSize = Math.max(10, Math.round(fontSize * 0.55));
 
@@ -45,15 +47,8 @@ export const FuriganaText: React.FC<FuriganaTextProps> = ({
         const currentReadingColor = isTarget ? targetHighlightColor : readingColor;
 
         if (hasReading) {
-          return (
-            <View
-              key={`token-${index}`}
-              style={[
-                styles.rubyPair,
-                isTarget && styles.targetRubyPair,
-              ]}
-              testID={isTarget ? `target-token-${token.surface}` : undefined}
-            >
+          const content = (
+            <>
               <Text
                 style={[
                   styles.readingText,
@@ -79,11 +74,71 @@ export const FuriganaText: React.FC<FuriganaTextProps> = ({
               >
                 {token.surface}
               </Text>
+            </>
+          );
+
+          if (isTarget && onPressToken) {
+            return (
+              <TouchableOpacity
+                key={`token-${index}`}
+                style={[styles.rubyPair, styles.targetRubyPair]}
+                onPress={() => onPressToken(token)}
+                activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel={`${token.surface}, reading: ${token.reading}`}
+                testID={`target-token-${token.surface}`}
+              >
+                {content}
+              </TouchableOpacity>
+            );
+          }
+
+          return (
+            <View
+              key={`token-${index}`}
+              style={[
+                styles.rubyPair,
+                isTarget && styles.targetRubyPair,
+              ]}
+              testID={isTarget ? `target-token-${token.surface}` : undefined}
+            >
+              {content}
             </View>
           );
         }
 
         // Plain token without ruby reading
+        const plainContent = (
+          <Text
+            style={[
+              styles.surfaceText,
+              {
+                fontSize: fontSize,
+                color: currentTextColor,
+                fontWeight: isTarget ? '700' : '400',
+              },
+            ]}
+          >
+            {token.surface}
+          </Text>
+        );
+
+        if (isTarget && onPressToken) {
+          return (
+            <TouchableOpacity
+              key={`token-${index}`}
+              style={[styles.plainPair, styles.targetPlainPair]}
+              onPress={() => onPressToken(token)}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel={`${token.surface}`}
+              testID={`target-token-${token.surface}`}
+            >
+              {plainContent}
+            </TouchableOpacity>
+          );
+        }
+
         return (
           <View
             key={`token-${index}`}
@@ -93,19 +148,7 @@ export const FuriganaText: React.FC<FuriganaTextProps> = ({
             ]}
             testID={isTarget ? `target-token-${token.surface}` : undefined}
           >
-            {/* Empty space holder to align baselines with ruby pairs when needed */}
-            <Text
-              style={[
-                styles.surfaceText,
-                {
-                  fontSize: fontSize,
-                  color: currentTextColor,
-                  fontWeight: isTarget ? '700' : '400',
-                },
-              ]}
-            >
-              {token.surface}
-            </Text>
+            {plainContent}
           </View>
         );
       })}

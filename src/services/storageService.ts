@@ -365,6 +365,74 @@ export class StorageService {
   }
 
   /**
+   * Helper to bulk-save words with default or custom lesson topic/context.
+   */
+  async saveWords(
+    words: TargetWord[],
+    sourceTopic: string = 'Imported Word List',
+    level: JLPTLevel = 'N5'
+  ): Promise<WordBankItem[]> {
+    return this.addWordsToWordBank(words, {
+      lessonId: `import-${Date.now()}`,
+      lessonTopic: sourceTopic,
+      jlptLevel: level,
+    });
+  }
+
+  /**
+   * Retrieves candidate words from the Word Bank for Practice Passages or spaced repetition review.
+   * Prioritizes words with lowest practice count, oldest lastPracticedAt, and oldest firstEncounteredAt.
+   */
+  async getWordsForPractice(limit: number = 8, level?: JLPTLevel): Promise<WordBankItem[]> {
+    const allWords = await this.getWordBank(level ? { level } : undefined);
+    if (allWords.length === 0) return [];
+
+    // Sort by least practiced, then oldest practiced, then oldest encountered
+    const sorted = [...allWords].sort((a, b) => {
+      const aCount = a.practiceCount || 0;
+      const bCount = b.practiceCount || 0;
+      if (aCount !== bCount) return aCount - bCount;
+
+      const aPracticedTime = a.lastPracticedAt ? new Date(a.lastPracticedAt).getTime() : 0;
+      const bPracticedTime = b.lastPracticedAt ? new Date(b.lastPracticedAt).getTime() : 0;
+      if (aPracticedTime !== bPracticedTime) return aPracticedTime - bPracticedTime;
+
+      return new Date(a.firstEncounteredAt).getTime() - new Date(b.firstEncounteredAt).getTime();
+    });
+
+    return sorted.slice(0, limit);
+  }
+
+  /**
+   * Records practice usage for a set of word surfaces, incrementing practiceCount and updating lastPracticedAt.
+   */
+  async recordWordPractice(wordSurfaces: string[]): Promise<void> {
+    if (!wordSurfaces || wordSurfaces.length === 0) return;
+    const currentWords = await this.getWordBank();
+    if (currentWords.length === 0) return;
+
+    const surfaceSet = new Set(wordSurfaces.map((s) => s.trim().toLowerCase()));
+    const now = new Date().toISOString();
+    let hasChanges = false;
+
+    const updatedWords = currentWords.map((item) => {
+      if (surfaceSet.has(item.word.trim().toLowerCase())) {
+        hasChanges = true;
+        return {
+          ...item,
+          practiceCount: (item.practiceCount || 0) + 1,
+          lastPracticedAt: now,
+        };
+      }
+      return item;
+    });
+
+    if (hasChanges) {
+      await AsyncStorage.setItem(STORAGE_KEYS.WORD_BANK, JSON.stringify(updatedWords));
+    }
+  }
+
+  /**
    * Deletes an individual word from the Word Bank.
    */
   async deleteWordBankItem(id: string): Promise<void> {

@@ -1,4 +1,5 @@
 import React from 'react';
+import { Alert } from 'react-native';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react-native';
 import { SettingsScreen } from '../../src/screens/SettingsScreen';
 import { storageService, geminiService } from '../../src/services';
@@ -101,5 +102,108 @@ describe('SettingsScreen', () => {
         expect.objectContaining({ ttsPlaybackRate: 0.75 })
       );
     });
+  });
+
+  it('opens import word list modal, previews extracted words, and persists confirmed words to Word Bank', async () => {
+    const mockEnriched = [
+      {
+        word: '買います',
+        reading: 'かいます',
+        romaji: 'kaimasu',
+        meaning: 'to buy',
+        partOfSpeech: 'verb',
+        examples: [],
+      },
+      {
+        word: '店員',
+        reading: 'てんいん',
+        romaji: 'ten-in',
+        meaning: 'store clerk',
+        partOfSpeech: 'noun',
+        examples: [],
+      },
+    ];
+
+    const importSpy = jest
+      .spyOn(geminiService, 'importWordList')
+      .mockImplementation(async (words, level, key, onProgress) => {
+        if (onProgress) onProgress(2, 2);
+        return mockEnriched;
+      });
+
+    const saveWordsSpy = jest.spyOn(storageService, 'saveWords').mockResolvedValue([]);
+
+    render(<SettingsScreen />);
+
+    await screen.findByText('Settings');
+
+    // Open import modal
+    const openBtn = screen.getByTestId('open-import-modal-btn');
+    fireEvent.press(openBtn);
+
+    // Enter complex line-formatted text in text area
+    const input = screen.getByTestId('import-text-input');
+    fireEvent.changeText(
+      input,
+      'かいます 【買います】 (kaimasu) — To buy\n店員 : store clerk\n余分な単語 (unwanted)'
+    );
+
+    // Click Preview Extracted Words
+    const previewBtn = screen.getByTestId('preview-import-btn');
+    fireEvent.press(previewBtn);
+
+    // Check preview screen elements
+    expect(screen.getByText('Confirm Parsed Words')).toBeTruthy();
+    expect(screen.getByTestId('parsed-chip-買います')).toBeTruthy();
+    expect(screen.getByTestId('parsed-chip-店員')).toBeTruthy();
+    expect(screen.getByTestId('parsed-chip-余分な単語')).toBeTruthy();
+    expect(screen.getByText(/3 Words Extracted/)).toBeTruthy();
+
+    // Remove the unwanted token chip
+    const removeUnwantedBtn = screen.getByTestId('remove-chip-余分な単語');
+    fireEvent.press(removeUnwantedBtn);
+
+    expect(screen.queryByTestId('parsed-chip-余分な単語')).toBeNull();
+    expect(screen.getByText(/2 Words Extracted/)).toBeTruthy();
+
+    // Confirm & Enrich remaining 2 words
+    const confirmBtn = screen.getByTestId('submit-import-btn');
+    fireEvent.press(confirmBtn);
+
+    await waitFor(() => {
+      expect(importSpy).toHaveBeenCalledWith(
+        ['買います', '店員'],
+        'N5',
+        'test-gemini-key',
+        expect.any(Function)
+      );
+      expect(saveWordsSpy).toHaveBeenCalledWith(mockEnriched, 'Imported Word List', 'N5');
+      expect(screen.getByText('Import Successful!')).toBeTruthy();
+    });
+  });
+
+  it('triggers Alert to clear Word Bank when Clear Word Bank (Dev) button is pressed', async () => {
+    const alertSpy = jest.spyOn(Alert, 'alert');
+    const clearWordBankSpy = jest.spyOn(storageService, 'clearWordBank').mockResolvedValue();
+
+    render(<SettingsScreen />);
+
+    await screen.findByText('Settings');
+
+    const clearBtn = screen.getByTestId('clear-word-bank-btn');
+    fireEvent.press(clearBtn);
+
+    expect(alertSpy).toHaveBeenCalledWith(
+      'Clear Word Bank?',
+      expect.stringContaining('This will remove all saved vocabulary'),
+      expect.any(Array)
+    );
+
+    // Trigger the destructive Clear action
+    const buttons = alertSpy.mock.calls[0][2] as any[];
+    const confirmAction = buttons.find((b: any) => b.text === 'Clear Word Bank');
+    await confirmAction.onPress();
+
+    expect(clearWordBankSpy).toHaveBeenCalled();
   });
 });

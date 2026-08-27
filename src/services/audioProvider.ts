@@ -8,6 +8,8 @@
 import * as Speech from 'expo-speech';
 import { AudioProvider, PlaybackOptions } from '../types/domain';
 
+export const PASSAGE_SENTENCE_GAP_MS = 800;
+
 export class NativeExpoSpeechProvider implements AudioProvider {
   readonly id = 'expo-speech';
   readonly name = 'Native Device Speech (Expo Speech)';
@@ -17,6 +19,14 @@ export class NativeExpoSpeechProvider implements AudioProvider {
   private currentPassageIndex = 0;
   private passageSentences: string[] = [];
   private activeOptions?: PlaybackOptions;
+  private gapTimeoutId: ReturnType<typeof setTimeout> | null = null;
+
+  private clearGapTimer(): void {
+    if (this.gapTimeoutId !== null) {
+      clearTimeout(this.gapTimeoutId);
+      this.gapTimeoutId = null;
+    }
+  }
 
   /**
    * Speaks an individual Japanese sentence with optional speed and voice overrides.
@@ -33,6 +43,7 @@ export class NativeExpoSpeechProvider implements AudioProvider {
         ? sentenceIndexOrOptions
         : options;
 
+    this.clearGapTimer();
     await Speech.stop();
     this.isCancelled = false;
     this.isPlayingPassage = false;
@@ -71,6 +82,7 @@ export class NativeExpoSpeechProvider implements AudioProvider {
     startIndex = 0,
     options?: PlaybackOptions
   ): Promise<void> {
+    this.clearGapTimer();
     await Speech.stop();
     this.isCancelled = false;
     this.isPlayingPassage = true;
@@ -114,13 +126,29 @@ export class NativeExpoSpeechProvider implements AudioProvider {
         if (!this.isCancelled && this.isPlayingPassage) {
           this.activeOptions?.onSentenceEnd?.(currentIndex);
           this.currentPassageIndex++;
-          this.playNextPassageSentence();
+
+          // Check if there are more sentences to play
+          if (this.currentPassageIndex < this.passageSentences.length) {
+            // Natural pause between dialogue sentences
+            this.clearGapTimer();
+            this.gapTimeoutId = setTimeout(() => {
+              this.gapTimeoutId = null;
+              if (!this.isCancelled && this.isPlayingPassage) {
+                this.playNextPassageSentence();
+              }
+            }, PASSAGE_SENTENCE_GAP_MS);
+          } else {
+            this.isPlayingPassage = false;
+            this.activeOptions?.onFinished?.();
+          }
         }
       },
       onStopped: () => {
+        this.clearGapTimer();
         this.isPlayingPassage = false;
       },
       onError: (err: any) => {
+        this.clearGapTimer();
         this.isPlayingPassage = false;
         this.activeOptions?.onError?.(
           err instanceof Error ? err : new Error(String(err))
@@ -133,6 +161,7 @@ export class NativeExpoSpeechProvider implements AudioProvider {
    * Stops any currently playing speech and cancels any ongoing passage queue.
    */
   async stop(): Promise<void> {
+    this.clearGapTimer();
     this.isCancelled = true;
     this.isPlayingPassage = false;
     await Speech.stop();
@@ -142,6 +171,7 @@ export class NativeExpoSpeechProvider implements AudioProvider {
    * Pauses the current speech synthesis.
    */
   async pause(): Promise<void> {
+    this.clearGapTimer();
     await Speech.pause();
   }
 

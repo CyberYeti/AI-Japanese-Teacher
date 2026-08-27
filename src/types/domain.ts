@@ -5,6 +5,8 @@
 
 export type JLPTLevel = 'N5' | 'N4' | 'N3' | 'N2' | 'N1';
 
+export type FuriganaMode = 'all' | 'target-only' | 'hidden';
+
 export type SpeakerGender = 'male' | 'female' | 'neutral';
 
 export interface TargetWord {
@@ -81,6 +83,8 @@ export interface WordBankItem {
   sourceLessonId: string;
   sourceLessonTopic: string;
   examples: WordExample[];
+  lastPracticedAt?: string;
+  practiceCount?: number;
 }
 
 export interface UserSettings {

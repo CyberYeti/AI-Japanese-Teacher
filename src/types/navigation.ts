@@ -17,6 +17,8 @@ export type RootStackParamList = {
   LessonStudy: {
     lesson: DailyLesson;
     initialScreen?: 'vocab' | 'dialogue';
+    isPassagePending?: boolean;
+    isPracticePassage?: boolean;
   };
   GenerateLessonModal: {
     initialTopic?: string;

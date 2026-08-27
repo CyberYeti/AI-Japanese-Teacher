@@ -2,6 +2,7 @@ import * as Speech from 'expo-speech';
 import {
   NativeExpoSpeechProvider,
   defaultAudioProvider,
+  PASSAGE_SENTENCE_GAP_MS,
 } from '../src/services/audioProvider';
 
 jest.mock('expo-speech', () => ({
@@ -93,6 +94,7 @@ describe('NativeExpoSpeechProvider', () => {
     ];
 
     it('should play sentences sequentially from startIndex', async () => {
+      jest.useFakeTimers();
       const onSentenceStart = jest.fn();
       const onSentenceEnd = jest.fn();
       const onFinished = jest.fn();
@@ -107,13 +109,17 @@ describe('NativeExpoSpeechProvider', () => {
       expect(Speech.speak).toHaveBeenCalledTimes(1);
       expect(Speech.speak).toHaveBeenLastCalledWith('いらっしゃいませ。', expect.anything());
 
-      // Simulate first sentence onDone -> triggers next
+      // Simulate first sentence onDone -> triggers gap timer -> next sentence
       let currentOptions = (Speech.speak as jest.Mock).mock.calls[0][1];
       currentOptions.onStart();
       expect(onSentenceStart).toHaveBeenCalledWith(0);
 
       currentOptions.onDone();
       expect(onSentenceEnd).toHaveBeenCalledWith(0);
+
+      // Advance past gap
+      jest.advanceTimersByTime(PASSAGE_SENTENCE_GAP_MS);
+
       expect(Speech.speak).toHaveBeenCalledTimes(2);
       expect(Speech.speak).toHaveBeenLastCalledWith('ホットコーヒーをお願いします。', expect.anything());
 
@@ -124,6 +130,10 @@ describe('NativeExpoSpeechProvider', () => {
 
       currentOptions.onDone();
       expect(onSentenceEnd).toHaveBeenCalledWith(1);
+
+      // Advance past gap
+      jest.advanceTimersByTime(PASSAGE_SENTENCE_GAP_MS);
+
       expect(Speech.speak).toHaveBeenCalledTimes(3);
       expect(Speech.speak).toHaveBeenLastCalledWith('かしこまりました。', expect.anything());
 
@@ -135,6 +145,63 @@ describe('NativeExpoSpeechProvider', () => {
       currentOptions.onDone();
       expect(onSentenceEnd).toHaveBeenCalledWith(2);
       expect(onFinished).toHaveBeenCalled();
+
+      jest.useRealTimers();
+    });
+
+    it('should pause for PASSAGE_SENTENCE_GAP_MS between sentences during passage playback', async () => {
+      jest.useFakeTimers();
+      const onSentenceStart = jest.fn();
+      const onSentenceEnd = jest.fn();
+      const onFinished = jest.fn();
+
+      await provider.playPassage(passage, 0, {
+        rate: 1.0,
+        onSentenceStart,
+        onSentenceEnd,
+        onFinished,
+      });
+
+      expect(Speech.speak).toHaveBeenCalledTimes(1);
+
+      // Sentence 1 ends
+      const currentOptions = (Speech.speak as jest.Mock).mock.calls[0][1];
+      currentOptions.onDone();
+      expect(onSentenceEnd).toHaveBeenCalledWith(0);
+
+      // Before timer ticks, sentence 2 has not started yet
+      expect(Speech.speak).toHaveBeenCalledTimes(1);
+
+      // Fast-forward through gap
+      jest.advanceTimersByTime(800);
+
+      expect(Speech.speak).toHaveBeenCalledTimes(2);
+      expect(Speech.speak).toHaveBeenLastCalledWith('ホットコーヒーをお願いします。', expect.anything());
+
+      jest.useRealTimers();
+    });
+
+    it('should cancel pending gap timer when stop() is called during the pause', async () => {
+      jest.useFakeTimers();
+      const onFinished = jest.fn();
+
+      await provider.playPassage(passage, 0, { onFinished });
+      expect(Speech.speak).toHaveBeenCalledTimes(1);
+
+      // Sentence 1 ends -> enters 800ms gap
+      const currentOptions = (Speech.speak as jest.Mock).mock.calls[0][1];
+      currentOptions.onDone();
+
+      // Stop during gap
+      await provider.stop();
+
+      // Fast-forward past gap
+      jest.advanceTimersByTime(1000);
+
+      expect(Speech.speak).toHaveBeenCalledTimes(1);
+      expect(onFinished).not.toHaveBeenCalled();
+
+      jest.useRealTimers();
     });
 
     it('should start at specified startIndex', async () => {

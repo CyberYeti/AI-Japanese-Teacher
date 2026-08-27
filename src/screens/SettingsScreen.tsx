@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
   Text,
@@ -8,6 +9,12 @@ import {
   TouchableOpacity,
   Switch,
   Alert,
+  Modal,
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  TouchableWithoutFeedback,
+  Keyboard,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { theme } from '../theme';
@@ -37,28 +44,42 @@ export const SettingsScreen: React.FC = () => {
     wordBankCount: 0,
   });
 
-  useEffect(() => {
-    const loadSettings = async () => {
-      try {
-        const key = await storageService.getApiKey();
-        if (key) setApiKey(key);
+  // Word List Import Modal State
+  const [isImportModalVisible, setIsImportModalVisible] = useState(false);
+  const [importStep, setImportStep] = useState<'input' | 'preview' | 'importing' | 'success'>('input');
+  const [importText, setImportText] = useState('');
+  const [parsedWords, setParsedWords] = useState<string[]>([]);
+  const [importLevel, setImportLevel] = useState<JLPTLevel>('N5');
+  const [isImporting, setIsImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState<{ completed: number; total: number } | null>(null);
+  const [importSuccessMsg, setImportSuccessMsg] = useState<string | null>(null);
+  const [importErrorMsg, setImportErrorMsg] = useState<string | null>(null);
 
-        const settings = await storageService.getUserSettings();
-        if (settings.ttsPlaybackRate) setSelectedSpeed(settings.ttsPlaybackRate);
-        if (settings.defaultJlptLevel) setDefaultLevel(settings.defaultJlptLevel);
-        if (settings.furiganaMode) setFuriganaMode(settings.furiganaMode);
-        if (typeof settings.englishSubtitles === 'boolean') {
-          setEnglishSubtitles(settings.englishSubtitles);
-        }
+  const loadSettings = useCallback(async () => {
+    try {
+      const key = await storageService.getApiKey();
+      if (key) setApiKey(key);
 
-        const stats = await storageService.getStorageStats();
-        setStorageStats(stats);
-      } catch (err) {
-        // fallback
+      const settings = await storageService.getUserSettings();
+      if (settings.ttsPlaybackRate) setSelectedSpeed(settings.ttsPlaybackRate);
+      if (settings.defaultJlptLevel) setDefaultLevel(settings.defaultJlptLevel);
+      if (settings.furiganaMode) setFuriganaMode(settings.furiganaMode);
+      if (typeof settings.englishSubtitles === 'boolean') {
+        setEnglishSubtitles(settings.englishSubtitles);
       }
-    };
-    loadSettings();
+
+      const stats = await storageService.getStorageStats();
+      setStorageStats(stats);
+    } catch (err) {
+      // fallback
+    }
   }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadSettings();
+    }, [loadSettings])
+  );
 
   const handleTestKey = async () => {
     if (!apiKey.trim()) {
@@ -104,6 +125,84 @@ export const SettingsScreen: React.FC = () => {
     await storageService.saveUserSettings({ englishSubtitles: val });
   };
 
+  const handlePreviewParsedWords = () => {
+    if (!importText.trim()) {
+      setImportErrorMsg('Please paste some Japanese vocabulary or Kanji to import.');
+      return;
+    }
+    const words = geminiService.parseRawWordList(importText.trim());
+    if (words.length === 0) {
+      setImportErrorMsg('No valid Japanese words could be extracted. Please check your text.');
+      return;
+    }
+    setParsedWords(words);
+    setImportErrorMsg(null);
+    setImportSuccessMsg(null);
+    setImportStep('preview');
+  };
+
+  const handleRemoveParsedWord = (indexToRemove: number) => {
+    setParsedWords((prev) => prev.filter((_, i) => i !== indexToRemove));
+  };
+
+  const handleBackToInput = () => {
+    setImportStep('input');
+    setImportErrorMsg(null);
+  };
+
+  const handleConfirmImport = async () => {
+    if (parsedWords.length === 0) {
+      setImportErrorMsg('No words remaining to import. Please go back and add words.');
+      return;
+    }
+    setImportStep('importing');
+    setIsImporting(true);
+    setImportErrorMsg(null);
+    setImportSuccessMsg(null);
+    setImportProgress(null);
+
+    try {
+      const enrichedWords = await geminiService.importWordList(
+        parsedWords,
+        importLevel,
+        apiKey.trim() ? apiKey.trim() : undefined,
+        (completed, total) => {
+          setImportProgress({ completed, total });
+        }
+      );
+
+      if (enrichedWords.length === 0) {
+        setIsImporting(false);
+        setImportStep('preview');
+        setImportErrorMsg('No valid words could be enriched from the provided list.');
+        return;
+      }
+
+      await storageService.saveWords(enrichedWords, 'Imported Word List', importLevel);
+      const stats = await storageService.getStorageStats();
+      setStorageStats(stats);
+
+      setIsImporting(false);
+      setImportStep('success');
+      setImportSuccessMsg(`Successfully enriched and imported ${enrichedWords.length} words to your Word Bank!`);
+    } catch (err: any) {
+      setIsImporting(false);
+      setImportStep('preview');
+      setImportErrorMsg(err?.message || 'Failed to import and enrich vocabulary.');
+    }
+  };
+
+  const handleCloseImportModal = () => {
+    if (isImporting) return;
+    setIsImportModalVisible(false);
+    setImportStep('input');
+    setImportText('');
+    setParsedWords([]);
+    setImportErrorMsg(null);
+    setImportSuccessMsg(null);
+    setImportProgress(null);
+  };
+
   const handleClearCache = () => {
     Alert.alert(
       'Clear Un-Starred Lessons?',
@@ -123,6 +222,26 @@ export const SettingsScreen: React.FC = () => {
             const stats = await storageService.getStorageStats();
             setStorageStats(stats);
             Alert.alert('Cleared', 'Un-starred lesson cache cleared.');
+          },
+        },
+      ]
+    );
+  };
+
+  const handleClearWordBank = () => {
+    Alert.alert(
+      'Clear Word Bank?',
+      'This will remove all saved vocabulary and imported words from your Word Bank. Your lessons, API key, and settings will remain intact.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear Word Bank',
+          style: 'destructive',
+          onPress: async () => {
+            await storageService.clearWordBank();
+            const stats = await storageService.getStorageStats();
+            setStorageStats(stats);
+            Alert.alert('Word Bank Cleared', 'All saved and imported words have been removed.');
           },
         },
       ]
@@ -210,6 +329,32 @@ export const SettingsScreen: React.FC = () => {
               </Text>
             </TouchableOpacity>
           </View>
+        </View>
+
+        {/* Word List Import Section */}
+        <View style={styles.card}>
+          <View style={styles.cardHeader}>
+            <Ionicons name="download-outline" size={20} color={theme.colors.brand.primary} />
+            <Text style={styles.cardTitle}>Word List Import</Text>
+          </View>
+          <Text style={styles.cardSubtitle}>
+            Paste external vocabulary lists (Anki, Genki, JLPT decks) to automatically enrich and add words into your cumulative Word Bank.
+          </Text>
+
+          <TouchableOpacity
+            style={styles.importLaunchButton}
+            onPress={() => {
+              setImportLevel(defaultLevel);
+              setImportErrorMsg(null);
+              setImportSuccessMsg(null);
+              setIsImportModalVisible(true);
+            }}
+            activeOpacity={0.7}
+            testID="open-import-modal-btn"
+          >
+            <Ionicons name="documents-outline" size={18} color="#ffffff" style={{ marginRight: 8 }} />
+            <Text style={styles.importLaunchButtonText}>Import Word List</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Japanese TTS Audio Settings */}
@@ -346,6 +491,19 @@ export const SettingsScreen: React.FC = () => {
             </TouchableOpacity>
 
             <TouchableOpacity
+              style={[
+                styles.dangerButton,
+                { backgroundColor: 'rgba(239, 68, 68, 0.08)', marginTop: 8 },
+              ]}
+              onPress={handleClearWordBank}
+              activeOpacity={0.7}
+              testID="clear-word-bank-btn"
+            >
+              <Ionicons name="book-outline" size={16} color={theme.colors.ui.error} style={{ marginRight: 6 }} />
+              <Text style={styles.dangerButtonText}>Clear Word Bank (Dev)</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
               style={[styles.dangerButton, { backgroundColor: 'rgba(239, 68, 68, 0.05)', marginTop: 8 }]}
               onPress={handleClearAllData}
               activeOpacity={0.7}
@@ -358,10 +516,271 @@ export const SettingsScreen: React.FC = () => {
 
         {/* About App */}
         <View style={styles.aboutFooter}>
-          <Text style={styles.aboutText}>AI Japanese Teacher · Version 1.0.0</Text>
+          <Text style={styles.aboutText}>AI Japanese Teacher · Version 0.1.0</Text>
           <Text style={styles.aboutSubtext}>Powered by Google Gemini & React Native Expo</Text>
         </View>
       </ScrollView>
+
+      {/* Word List Import Modal */}
+      <Modal
+        visible={isImportModalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={handleCloseImportModal}
+      >
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 20 : 0}
+        >
+          <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+            <View style={styles.modalBackdropDismiss} />
+          </TouchableWithoutFeedback>
+
+          <View style={styles.modalContainer}>
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={styles.modalScrollContent}
+            >
+              {/* Modal Header */}
+              <View style={styles.modalHeader}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Ionicons
+                    name={importStep === 'preview' ? 'list-outline' : 'download-outline'}
+                    size={22}
+                    color={theme.colors.brand.primary}
+                  />
+                  <Text style={styles.modalTitle}>
+                    {importStep === 'input' && 'Import Word List'}
+                    {importStep === 'preview' && 'Confirm Parsed Words'}
+                    {importStep === 'importing' && 'Enriching Words...'}
+                    {importStep === 'success' && 'Import Complete!'}
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  onPress={handleCloseImportModal}
+                  disabled={isImporting}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  testID="close-import-modal-btn"
+                >
+                  <Ionicons name="close" size={24} color={theme.colors.text.subtle} />
+                </TouchableOpacity>
+              </View>
+
+              {/* STEP 1: INPUT */}
+              {importStep === 'input' && (
+                <>
+                  <Text style={styles.modalSubtitle}>
+                    Paste Japanese words, Kanji, or notes (e.g. from textbooks or Anki). The smart parser will extract the target words and enrich definitions, readings, and example sentences.
+                  </Text>
+
+                  {/* Target JLPT Level Selection */}
+                  <Text style={styles.modalFieldLabel}>Target Level</Text>
+                  <View style={styles.levelRow}>
+                    {(['N5', 'N4', 'N3', 'N2', 'N1'] as JLPTLevel[]).map((level) => {
+                      const isSelected = importLevel === level;
+                      const levelColor = theme.colors.jlpt[level];
+                      return (
+                        <TouchableOpacity
+                          key={level}
+                          onPress={() => setImportLevel(level)}
+                          style={[
+                            styles.levelPill,
+                            isSelected && {
+                              backgroundColor: levelColor.bg,
+                              borderColor: levelColor.text,
+                              borderWidth: 1.5,
+                            },
+                          ]}
+                          activeOpacity={0.7}
+                        >
+                          <Text
+                            style={[
+                              styles.levelPillText,
+                              isSelected ? { color: levelColor.text, fontWeight: '700' } : { color: theme.colors.text.muted },
+                            ]}
+                          >
+                            {level}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+
+                  {/* Input Text Area */}
+                  <Text style={[styles.modalFieldLabel, { marginTop: theme.spacing.md }]}>Word List (Plain Text)</Text>
+                  <TextInput
+                    style={styles.modalTextArea}
+                    placeholder="e.g.&#10;注文, 予約&#10;かいます 【買います】 (kaimasu) — To buy&#10;店員 : store clerk"
+                    placeholderTextColor={theme.colors.text.subtle}
+                    value={importText}
+                    onChangeText={(text) => {
+                      setImportText(text);
+                      setImportErrorMsg(null);
+                    }}
+                    multiline
+                    numberOfLines={6}
+                    textAlignVertical="top"
+                    testID="import-text-input"
+                  />
+
+                  {importErrorMsg && (
+                    <View style={styles.errorBanner}>
+                      <Ionicons name="alert-circle" size={18} color={theme.colors.ui.error} />
+                      <Text style={styles.errorBannerText}>{importErrorMsg}</Text>
+                    </View>
+                  )}
+
+                  {/* Preview Action Button */}
+                  <TouchableOpacity
+                    style={[
+                      styles.submitImportButton,
+                      !importText.trim() && styles.buttonDisabled,
+                    ]}
+                    onPress={handlePreviewParsedWords}
+                    disabled={!importText.trim()}
+                    activeOpacity={0.8}
+                    testID="preview-import-btn"
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <Text style={styles.submitImportButtonText}>Preview Extracted Words</Text>
+                      <Ionicons name="arrow-forward" size={18} color="#ffffff" />
+                    </View>
+                  </TouchableOpacity>
+                </>
+              )}
+
+              {/* STEP 2: PREVIEW & CONFIRMATION */}
+              {importStep === 'preview' && (
+                <>
+                  <Text style={styles.modalSubtitle}>
+                    Review the extracted words below before sending requests to the AI model. Tap × on any chip to remove unwanted terms.
+                  </Text>
+
+                  <View style={styles.previewStatsHeader}>
+                    <View style={styles.previewCountBadge}>
+                      <Text style={styles.previewCountBadgeText}>
+                        {parsedWords.length} {parsedWords.length === 1 ? 'Word' : 'Words'} Extracted · JLPT {importLevel}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* Parsed Words Chips Scroll Container */}
+                  <ScrollView
+                    style={styles.previewChipsScroll}
+                    contentContainerStyle={styles.previewChipsContent}
+                    nestedScrollEnabled={true}
+                    showsVerticalScrollIndicator={true}
+                    testID="preview-chips-scroll"
+                  >
+                    {parsedWords.length === 0 ? (
+                      <Text style={styles.emptyParsedText}>No words remaining. Tap "Edit Text" to add words.</Text>
+                    ) : (
+                      parsedWords.map((word, idx) => (
+                        <View key={`${word}-${idx}`} style={styles.previewWordChip} testID={`parsed-chip-${word}`}>
+                          <Text style={styles.previewWordChipText}>{word}</Text>
+                          <TouchableOpacity
+                            onPress={() => handleRemoveParsedWord(idx)}
+                            style={styles.removeChipBtn}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                            testID={`remove-chip-${word}`}
+                          >
+                            <Ionicons name="close-circle" size={16} color={theme.colors.text.muted} />
+                          </TouchableOpacity>
+                        </View>
+                      ))
+                    )}
+                  </ScrollView>
+
+                  {importErrorMsg && (
+                    <View style={styles.errorBanner}>
+                      <Ionicons name="alert-circle" size={18} color={theme.colors.ui.error} />
+                      <Text style={styles.errorBannerText}>{importErrorMsg}</Text>
+                    </View>
+                  )}
+
+                  {/* Action Buttons Row */}
+                  <View style={styles.previewActionsRow}>
+                    <TouchableOpacity
+                      style={styles.backToInputBtn}
+                      onPress={handleBackToInput}
+                      activeOpacity={0.8}
+                      testID="back-to-input-btn"
+                    >
+                      <Ionicons name="arrow-back" size={18} color={theme.colors.text.primary} style={{ marginRight: 6 }} />
+                      <Text style={styles.backToInputBtnText}>Edit Text</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[
+                        styles.confirmImportBtn,
+                        parsedWords.length === 0 && styles.buttonDisabled,
+                      ]}
+                      onPress={handleConfirmImport}
+                      disabled={parsedWords.length === 0}
+                      activeOpacity={0.8}
+                      testID="submit-import-btn"
+                    >
+                      <Ionicons name="sparkles" size={18} color="#ffffff" style={{ marginRight: 6 }} />
+                      <Text style={styles.submitImportButtonText}>
+                        Enrich ({parsedWords.length})
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </>
+              )}
+
+              {/* STEP 3: IMPORTING PROGRESS */}
+              {importStep === 'importing' && (
+                <View style={styles.importingStepBox}>
+                  <ActivityIndicator size="large" color={theme.colors.brand.primary} style={{ marginBottom: theme.spacing.md }} />
+                  <Text style={styles.importingStepTitle}>Enriching Vocabulary with AI</Text>
+                  <Text style={styles.importingStepSubtitle}>
+                    Generating readings, definitions, and 3 authentic example sentences for each word...
+                  </Text>
+                  {importProgress && (
+                    <Text style={styles.importingProgressText}>
+                      Completed {importProgress.completed} of {importProgress.total} words
+                    </Text>
+                  )}
+                  {importProgress && importProgress.total > 0 && (
+                    <View style={[styles.progressBarTrack, { width: '100%', marginTop: theme.spacing.md }]}>
+                      <View
+                        style={[
+                          styles.progressBarFill,
+                          { width: `${Math.round((importProgress.completed / importProgress.total) * 100)}%` },
+                        ]}
+                      />
+                    </View>
+                  )}
+                </View>
+              )}
+
+              {/* STEP 4: SUCCESS */}
+              {importStep === 'success' && (
+                <View style={styles.successStepBox}>
+                  <View style={styles.successIconBadge}>
+                    <Ionicons name="checkmark" size={32} color="#ffffff" />
+                  </View>
+                  <Text style={styles.successStepTitle}>Import Successful!</Text>
+                  <Text style={styles.successStepSubtitle}>
+                    {importSuccessMsg || `Successfully enriched and added ${parsedWords.length} words to your Word Bank.`}
+                  </Text>
+                  <TouchableOpacity
+                    style={styles.doneButton}
+                    onPress={handleCloseImportModal}
+                    activeOpacity={0.8}
+                    testID="import-done-btn"
+                  >
+                    <Text style={styles.doneButtonText}>Done</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </ScrollView>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -582,6 +1001,308 @@ const styles = StyleSheet.create({
     color: theme.colors.ui.error,
     fontSize: theme.typography.sizes.bodySm,
     fontWeight: theme.typography.weights.semibold,
+  },
+  importLaunchButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: theme.colors.brand.primary,
+    borderRadius: theme.borderRadius.lg,
+    paddingVertical: theme.spacing.md,
+    paddingHorizontal: theme.spacing.lg,
+  },
+  importLaunchButtonText: {
+    color: '#ffffff',
+    fontSize: theme.typography.sizes.body,
+    fontWeight: theme.typography.weights.bold,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    justifyContent: 'flex-end',
+  },
+  modalBackdropDismiss: {
+    flex: 1,
+  },
+  modalContainer: {
+    backgroundColor: theme.colors.background.secondary,
+    borderTopLeftRadius: theme.borderRadius.xl,
+    borderTopRightRadius: theme.borderRadius.xl,
+    padding: theme.spacing.xl,
+    paddingBottom: Platform.OS === 'ios' ? 34 : 24,
+    borderWidth: 1,
+    borderColor: theme.colors.background.cardBorder,
+    maxHeight: '90%',
+  },
+  modalScrollContent: {
+    paddingBottom: theme.spacing.md,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: theme.spacing.xs,
+  },
+  modalTitle: {
+    fontSize: theme.typography.sizes.heading,
+    fontWeight: theme.typography.weights.bold,
+    color: theme.colors.text.primary,
+  },
+  modalSubtitle: {
+    fontSize: theme.typography.sizes.caption,
+    color: theme.colors.text.muted,
+    lineHeight: 18,
+    marginBottom: theme.spacing.md,
+  },
+  modalFieldLabel: {
+    fontSize: theme.typography.sizes.caption,
+    fontWeight: theme.typography.weights.semibold,
+    color: theme.colors.text.secondary,
+    marginBottom: theme.spacing.xs,
+  },
+  modalTextArea: {
+    backgroundColor: 'rgba(15, 23, 42, 0.7)',
+    borderRadius: theme.borderRadius.lg,
+    borderWidth: 1,
+    borderColor: theme.colors.background.cardBorder,
+    padding: theme.spacing.md,
+    color: theme.colors.text.primary,
+    fontSize: theme.typography.sizes.body,
+    minHeight: 120,
+    marginBottom: theme.spacing.md,
+  },
+  progressContainer: {
+    backgroundColor: 'rgba(15, 23, 42, 0.6)',
+    borderRadius: theme.borderRadius.md,
+    padding: theme.spacing.md,
+    marginBottom: theme.spacing.md,
+    borderWidth: 1,
+    borderColor: theme.colors.background.cardBorder,
+  },
+  progressHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: theme.spacing.sm,
+  },
+  progressText: {
+    fontSize: theme.typography.sizes.caption,
+    color: theme.colors.text.secondary,
+    fontWeight: theme.typography.weights.medium,
+  },
+  progressBarTrack: {
+    height: 6,
+    backgroundColor: 'rgba(51, 65, 85, 0.4)',
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  progressBarFill: {
+    height: '100%',
+    backgroundColor: theme.colors.brand.primary,
+    borderRadius: 3,
+  },
+  successBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.3)',
+    borderRadius: theme.borderRadius.md,
+    padding: theme.spacing.sm + 2,
+    marginBottom: theme.spacing.md,
+  },
+  successBannerText: {
+    color: theme.colors.ui.success,
+    fontSize: theme.typography.sizes.caption,
+    fontWeight: theme.typography.weights.semibold,
+    flex: 1,
+  },
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.3)',
+    borderRadius: theme.borderRadius.md,
+    padding: theme.spacing.sm + 2,
+    marginBottom: theme.spacing.md,
+  },
+  errorBannerText: {
+    color: theme.colors.ui.error,
+    fontSize: theme.typography.sizes.caption,
+    fontWeight: theme.typography.weights.semibold,
+    flex: 1,
+  },
+  submitImportButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: theme.colors.brand.primary,
+    borderRadius: theme.borderRadius.lg,
+    paddingVertical: theme.spacing.md,
+  },
+  submitImportButtonText: {
+    color: '#ffffff',
+    fontSize: theme.typography.sizes.body,
+    fontWeight: theme.typography.weights.bold,
+  },
+  previewStatsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: theme.spacing.md,
+  },
+  previewCountBadge: {
+    backgroundColor: 'rgba(59, 130, 246, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(59, 130, 246, 0.3)',
+    borderRadius: theme.borderRadius.round,
+    paddingVertical: 4,
+    paddingHorizontal: theme.spacing.md,
+  },
+  previewCountBadgeText: {
+    color: theme.colors.brand.primary,
+    fontSize: theme.typography.sizes.caption,
+    fontWeight: theme.typography.weights.bold,
+  },
+  previewChipsScroll: {
+    maxHeight: 240,
+    backgroundColor: 'rgba(15, 23, 42, 0.5)',
+    borderRadius: theme.borderRadius.lg,
+    borderWidth: 1,
+    borderColor: theme.colors.background.cardBorder,
+    marginBottom: theme.spacing.lg,
+  },
+  previewChipsContent: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: theme.spacing.sm,
+    padding: theme.spacing.md,
+  },
+  emptyParsedText: {
+    fontSize: theme.typography.sizes.caption,
+    color: theme.colors.text.muted,
+    textAlign: 'center',
+    width: '100%',
+    paddingVertical: theme.spacing.md,
+  },
+  previewWordChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.colors.background.card,
+    borderRadius: theme.borderRadius.md,
+    paddingVertical: 6,
+    paddingHorizontal: theme.spacing.sm + 2,
+    borderWidth: 1,
+    borderColor: theme.colors.background.cardBorder,
+    gap: 6,
+  },
+  previewWordChipText: {
+    fontSize: theme.typography.sizes.bodySm,
+    fontWeight: theme.typography.weights.bold,
+    color: theme.colors.text.primary,
+  },
+  removeChipBtn: {
+    padding: 2,
+  },
+  previewActionsRow: {
+    flexDirection: 'row',
+    gap: theme.spacing.md,
+    marginTop: theme.spacing.xs,
+  },
+  backToInputBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: theme.colors.background.card,
+    borderRadius: theme.borderRadius.lg,
+    paddingVertical: theme.spacing.md,
+    borderWidth: 1,
+    borderColor: theme.colors.background.cardBorder,
+  },
+  backToInputBtnText: {
+    color: theme.colors.text.primary,
+    fontSize: theme.typography.sizes.body,
+    fontWeight: theme.typography.weights.semibold,
+  },
+  confirmImportBtn: {
+    flex: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: theme.colors.brand.primary,
+    borderRadius: theme.borderRadius.lg,
+    paddingVertical: theme.spacing.md,
+    ...theme.shadows.glow,
+  },
+  importingStepBox: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: theme.spacing.xl,
+    paddingHorizontal: theme.spacing.md,
+  },
+  importingStepTitle: {
+    fontSize: theme.typography.sizes.bodyLg,
+    fontWeight: theme.typography.weights.bold,
+    color: theme.colors.text.primary,
+    marginBottom: theme.spacing.xs,
+    textAlign: 'center',
+  },
+  importingStepSubtitle: {
+    fontSize: theme.typography.sizes.caption,
+    color: theme.colors.text.muted,
+    textAlign: 'center',
+    lineHeight: 18,
+    marginBottom: theme.spacing.md,
+  },
+  importingProgressText: {
+    fontSize: theme.typography.sizes.bodySm,
+    fontWeight: theme.typography.weights.semibold,
+    color: theme.colors.brand.light,
+    marginTop: theme.spacing.xs,
+  },
+  successStepBox: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: theme.spacing.xl,
+    paddingHorizontal: theme.spacing.md,
+  },
+  successIconBadge: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: theme.colors.ui.success,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: theme.spacing.md,
+  },
+  successStepTitle: {
+    fontSize: theme.typography.sizes.heading,
+    fontWeight: theme.typography.weights.bold,
+    color: theme.colors.text.primary,
+    marginBottom: theme.spacing.xs,
+  },
+  successStepSubtitle: {
+    fontSize: theme.typography.sizes.bodySm,
+    color: theme.colors.text.muted,
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: theme.spacing.xl,
+  },
+  doneButton: {
+    backgroundColor: theme.colors.ui.success,
+    borderRadius: theme.borderRadius.lg,
+    paddingVertical: theme.spacing.md,
+    paddingHorizontal: theme.spacing.xxl,
+    width: '100%',
+    alignItems: 'center',
+  },
+  doneButtonText: {
+    color: '#ffffff',
+    fontSize: theme.typography.sizes.body,
+    fontWeight: theme.typography.weights.bold,
   },
   aboutFooter: {
     alignItems: 'center',

@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react-native';
+import { render, screen, fireEvent } from '@testing-library/react-native';
 import { FuriganaText } from '../../src/components/FuriganaText';
 import { SentenceToken } from '../../src/types/domain';
 
@@ -58,5 +58,22 @@ describe('FuriganaText Component', () => {
 
     expect(getByTestId('furigana-container')).toBeTruthy();
     expect(getByTestId('target-token-注文')).toBeTruthy();
+  });
+
+  it('calls onPressToken when a highlighted target token is pressed', () => {
+    const onPressTokenMock = jest.fn();
+    const { getByTestId } = render(
+      <FuriganaText
+        tokens={sampleTokens}
+        mode="all"
+        onPressToken={onPressTokenMock}
+      />
+    );
+
+    const targetBtn = getByTestId('target-token-注文');
+    expect(targetBtn).toBeTruthy();
+    fireEvent.press(targetBtn);
+    expect(onPressTokenMock).toHaveBeenCalledTimes(1);
+    expect(onPressTokenMock).toHaveBeenCalledWith(sampleTokens[2]);
   });
 });

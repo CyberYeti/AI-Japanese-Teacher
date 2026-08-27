@@ -375,4 +375,63 @@ describe('StorageService', () => {
       expect(await storageService.getWordBank()).toHaveLength(0);
     });
   });
+
+  describe('Word Bank Spaced Rotation & Practice Tracking', () => {
+    it('saveWords saves vocabulary to Word Bank with custom source topic', async () => {
+      await storageService.saveWords(
+        [
+          {
+            word: '予約',
+            reading: 'よやく',
+            romaji: 'yoyaku',
+            meaning: 'reservation',
+            partOfSpeech: 'noun',
+            examples: [],
+          },
+        ],
+        'Imported Deck',
+        'N5'
+      );
+
+      const items = await storageService.getWordBank();
+      expect(items).toHaveLength(1);
+      expect(items[0].word).toBe('予約');
+      expect(items[0].sourceLessonTopic).toBe('Imported Deck');
+      expect(items[0].jlptLevel).toBe('N5');
+    });
+
+    it('getWordsForPractice returns words prioritized by lowest practice count and oldest timestamps', async () => {
+      await storageService.saveWords([
+        { word: '単語A', reading: 'たんごA', romaji: 'tangoA', meaning: 'word A', partOfSpeech: 'noun' },
+        { word: '単語B', reading: 'たんごB', romaji: 'tangoB', meaning: 'word B', partOfSpeech: 'noun' },
+        { word: '単語C', reading: 'たんごC', romaji: 'tangoC', meaning: 'word C', partOfSpeech: 'noun' },
+      ]);
+
+      // Record practice on 単語A
+      await storageService.recordWordPractice(['単語A']);
+
+      const candidates = await storageService.getWordsForPractice(2);
+      expect(candidates).toHaveLength(2);
+      // 単語B and 単語C have practiceCount = 0 (or undefined), so they are prioritized over 単語A
+      const candidateSurfaces = candidates.map((c) => c.word);
+      expect(candidateSurfaces).toContain('単語B');
+      expect(candidateSurfaces).toContain('単語C');
+      expect(candidateSurfaces).not.toContain('単語A');
+    });
+
+    it('recordWordPractice increments practiceCount and updates lastPracticedAt', async () => {
+      await storageService.saveWords([
+        { word: '会計', reading: 'かいけい', romaji: 'kaikei', meaning: 'bill / check', partOfSpeech: 'noun' },
+      ]);
+
+      await storageService.recordWordPractice(['会計']);
+      let item = await storageService.getWordBankItem('会計');
+      expect(item?.practiceCount).toBe(1);
+      expect(item?.lastPracticedAt).toBeTruthy();
+
+      await storageService.recordWordPractice(['会計']);
+      item = await storageService.getWordBankItem('会計');
+      expect(item?.practiceCount).toBe(2);
+    });
+  });
 });

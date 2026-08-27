@@ -45,22 +45,28 @@ export const colors = {
   },
   speakers: {
     speakerA: {
-      badgeBg: 'rgba(59, 130, 246, 0.15)',
+      badgeBg: 'rgba(59, 130, 246, 0.2)',
       badgeText: '#60a5fa',
-      border: 'rgba(59, 130, 246, 0.3)',
-      highlightBg: 'rgba(59, 130, 246, 0.08)',
+      border: 'rgba(59, 130, 246, 0.4)',
+      bubbleBg: 'rgba(23, 37, 84, 0.5)', // deep blue slate tint
+      highlightBg: 'rgba(59, 130, 246, 0.12)',
+      accent: '#3b82f6',
     },
     speakerB: {
-      badgeBg: 'rgba(16, 185, 129, 0.15)',
+      badgeBg: 'rgba(16, 185, 129, 0.2)',
       badgeText: '#34d399',
-      border: 'rgba(16, 185, 129, 0.3)',
-      highlightBg: 'rgba(16, 185, 129, 0.08)',
+      border: 'rgba(16, 185, 129, 0.4)',
+      bubbleBg: 'rgba(6, 44, 34, 0.5)', // deep emerald slate tint
+      highlightBg: 'rgba(16, 185, 129, 0.12)',
+      accent: '#10b981',
     },
     narrator: {
-      badgeBg: 'rgba(168, 85, 247, 0.15)',
+      badgeBg: 'rgba(168, 85, 247, 0.2)',
       badgeText: '#c084fc',
-      border: 'rgba(168, 85, 247, 0.3)',
-      highlightBg: 'rgba(168, 85, 247, 0.08)',
+      border: 'rgba(168, 85, 247, 0.4)',
+      bubbleBg: 'rgba(46, 16, 68, 0.5)', // deep purple slate tint
+      highlightBg: 'rgba(168, 85, 247, 0.12)',
+      accent: '#a855f7',
     },
   },
   ui: {

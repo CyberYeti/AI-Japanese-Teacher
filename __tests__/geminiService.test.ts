@@ -3,8 +3,11 @@ import {
   buildResponseSchema,
   parseAndValidateLessonResponse,
   generateLesson,
+  generateTargetVocabulary,
+  generatePassageForVocabulary,
   validateApiKey,
   getMockLesson,
+  geminiService,
   InvalidApiKeyError,
   RateLimitError,
   GeminiParseError,
@@ -26,6 +29,12 @@ describe('GeminiService', () => {
       const prompt = buildPrompt('N3', 'Job Interview', 'Focus on polite keigo');
       expect(prompt).toContain('Focus on polite keigo');
       expect(prompt).toContain('JLPT N3');
+    });
+
+    it('should include excluded vocabulary negative constraint when excludeWords is provided', () => {
+      const prompt = buildPrompt('N5', 'Daily Routine', undefined, ['食べる', '飲む', '行く']);
+      expect(prompt).toContain('Do NOT use any of the following already-learned words');
+      expect(prompt).toContain('食べる, 飲む, 行く');
     });
   });
 
@@ -300,6 +309,196 @@ describe('GeminiService', () => {
           fetchFn: mockFetch as any,
         })
       ).rejects.toThrow(RateLimitError);
+    });
+  });
+
+  describe('Two-Phase Generation', () => {
+    it('generateTargetVocabulary should return structured vocabulary and topic metadata (offline fallback)', async () => {
+      const result = await geminiService.generateTargetVocabulary('Ordering at a Café', 'N5');
+      expect(result).toBeDefined();
+      expect(result.topic).toBe('Ordering at a Café');
+      expect(result.level).toBe('N5');
+      expect(result.targetVocabulary.length).toBeGreaterThan(0);
+      expect(result.targetVocabulary[0].examples?.length).toBe(3);
+    });
+
+    it('generatePassageForVocabulary should return dialogue sentences embedding target words (offline fallback)', async () => {
+      const vocab = (await geminiService.generateTargetVocabulary('Ordering at a Café', 'N5')).targetVocabulary;
+      const passageResult = await geminiService.generatePassageForVocabulary(
+        vocab,
+        'Ordering at a Café',
+        'N5'
+      );
+      expect(passageResult).toBeDefined();
+      expect(passageResult.sentences.length).toBeGreaterThan(0);
+      expect(passageResult.sentences[0].japanese).toBeTruthy();
+      expect(passageResult.sentences[0].tokens.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('Word List Import (Batched LLM Enrichment)', () => {
+    it('should split raw text into clean word tokens, enrich them, and report batch progress', async () => {
+      const rawInput = ' 注文, 予約 \n 店員 、 会計　\n\n ';
+      const progressTracker: { completed: number; total: number }[] = [];
+
+      const result = await geminiService.importWordList(
+        rawInput,
+        'N5',
+        undefined,
+        (completed, total) => {
+          progressTracker.push({ completed, total });
+        }
+      );
+
+      expect(result).toBeDefined();
+      expect(result.length).toBe(4);
+      expect(result.map((w) => w.word)).toEqual(['注文', '予約', '店員', '会計']);
+      expect(result[0].reading).toBeTruthy();
+      expect(result[0].meaning).toBeTruthy();
+      expect(result[0].examples?.length).toBeGreaterThan(0);
+      expect(progressTracker.length).toBeGreaterThan(0);
+      expect(progressTracker[progressTracker.length - 1].completed).toBe(4);
+      expect(progressTracker[progressTracker.length - 1].total).toBe(4);
+    });
+
+    it('should return an empty array if raw input text contains no words', async () => {
+      const result = await geminiService.importWordList('  , \n \t ', 'N5');
+      expect(result).toEqual([]);
+    });
+
+    it('parseRawWordList should accurately extract Japanese words from formatted notes with brackets, romaji, and english', () => {
+      const complexNotes = `
+かいます 【買います】 (kaimasu) — To buy
+たべます 【食べます】 (tabemasu) — To eat
+1. のみます 【飲みます】 - to drink
+4. 猫 (neko) : cat
+いく / iku / to go
+      `;
+
+      const parsed = geminiService.parseRawWordList(complexNotes);
+      expect(parsed).toEqual(['買います', '食べます', '飲みます', '猫', 'いく']);
+    });
+
+    it('parseRawWordList should parse clean comma- and whitespace-separated lists', () => {
+      const input = '注文, 予約\n店員、会計';
+      const parsed = geminiService.parseRawWordList(input);
+      expect(parsed).toEqual(['注文', '予約', '店員', '会計']);
+    });
+
+    it('parseRawWordList should parse single-line comma-separated entries with English definitions', () => {
+      const input = '食べる (to eat, consume), 飲む (to drink), 行く (to go)';
+      const parsed = geminiService.parseRawWordList(input);
+      expect(parsed).toEqual(['食べる', '飲む', '行く']);
+    });
+
+    it('parseRawWordList should parse inline numbered items on a single line', () => {
+      const input = '1. 注文 2. 予約 3. 店員';
+      const parsed = geminiService.parseRawWordList(input);
+      expect(parsed).toEqual(['注文', '予約', '店員']);
+    });
+
+    it('parseRawWordList should parse comma lists with trailing category tags or notes', () => {
+      const input = '注文, 予約, 店員 (N5 vocabulary)';
+      const parsed = geminiService.parseRawWordList(input);
+      expect(parsed).toEqual(['注文', '予約', '店員']);
+    });
+
+    it('importWordList should accept pre-parsed word arrays directly', async () => {
+      const preParsedWords = ['注文', '予約'];
+      const result = await geminiService.importWordList(preParsedWords, 'N5');
+      expect(result.length).toBe(2);
+      expect(result.map((w) => w.word)).toEqual(['注文', '予約']);
+    });
+  });
+
+  describe('Practice Passage Generation', () => {
+    const mockWords = [
+      {
+        word: '注文',
+        reading: 'ちゅうもん',
+        romaji: 'chuumon',
+        meaning: 'order',
+        partOfSpeech: 'noun',
+        examples: [],
+      },
+      {
+        word: '店員',
+        reading: 'てんいん',
+        romaji: 'ten-in',
+        meaning: 'store clerk',
+        partOfSpeech: 'noun',
+        examples: [],
+      },
+    ];
+
+    it('buildPracticePassagePrompt should construct a prompt with level and vocabulary', () => {
+      const prompt = geminiService.buildPracticePassagePrompt(mockWords, 'N5', 'Word Bank Immersion');
+      expect(prompt).toContain('JLPT N5');
+      expect(prompt).toContain('注文');
+      expect(prompt).toContain('店員');
+    });
+
+    it('generatePracticePassage should generate a dialogue from existing Word Bank words with API key', async () => {
+      const mockFetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      title: 'カフェで注文',
+                      titleTokens: [{ surface: 'カフェで注文', reading: '', isTarget: false }],
+                      sentences: [
+                        {
+                          id: 1,
+                          speaker: '店員',
+                          speakerId: 'A',
+                          japanese: 'ご注文をどうぞ。',
+                          english: 'Your order please.',
+                          tokens: [
+                            { surface: 'ご', reading: '', isTarget: false },
+                            { surface: '注文', reading: 'ちゅうもん', isTarget: true },
+                            { surface: 'をどうぞ。', reading: '', isTarget: false },
+                          ],
+                        },
+                      ],
+                    }),
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+      });
+
+      const lesson = await geminiService.generatePracticePassage({
+        words: mockWords,
+        level: 'N5',
+        topic: 'Word Bank Immersion',
+        apiKey: 'test-api-key',
+        fetchFn: mockFetch as any,
+      });
+
+      expect(lesson).toBeDefined();
+      expect(lesson.title).toBe('カフェで注文');
+      expect(lesson.sentences.length).toBe(1);
+    });
+
+    it('generatePracticePassage should generate a dialogue from existing Word Bank words (offline fallback)', async () => {
+      const lesson = await geminiService.generatePracticePassage({
+        words: mockWords,
+        level: 'N5',
+        topic: 'Word Bank Immersion',
+      });
+
+      expect(lesson).toBeDefined();
+      expect(lesson.id).toMatch(/^practice-n5-/);
+      expect(lesson.topic).toBe('Word Bank Immersion');
+      expect(lesson.targetVocabulary).toEqual(mockWords);
+      expect(lesson.sentences.length).toBeGreaterThan(0);
+      expect(lesson.sentences[0].japanese).toBeTruthy();
     });
   });
 });

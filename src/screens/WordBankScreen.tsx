@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
   Text,
@@ -20,6 +21,7 @@ export const WordBankScreen: React.FC = () => {
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [words, setWords] = useState<WordBankItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [expandedWordIds, setExpandedWordIds] = useState<Set<string>>(new Set());
 
   const loadWordBank = useCallback(async () => {
     try {
@@ -33,9 +35,23 @@ export const WordBankScreen: React.FC = () => {
     }
   }, []);
 
-  useEffect(() => {
-    loadWordBank();
-  }, [loadWordBank]);
+  useFocusEffect(
+    useCallback(() => {
+      loadWordBank();
+    }, [loadWordBank])
+  );
+
+  const toggleExpandWord = (id: string) => {
+    setExpandedWordIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
 
   const handlePlayWord = async (id: string, text: string) => {
     setPlayingId(id);
@@ -131,10 +147,21 @@ export const WordBankScreen: React.FC = () => {
           ) : (
             filteredWords.map((item) => {
               const isPlaying = playingId === item.id;
+              const isExpanded = expandedWordIds.has(item.id);
               const levelColor = theme.colors.jlpt[item.jlptLevel] || theme.colors.jlpt.N5;
 
               return (
-                <View key={item.id} style={styles.wordCard}>
+                <TouchableOpacity
+                  key={item.id}
+                  style={[
+                    styles.wordCard,
+                    isExpanded && styles.wordCardExpanded,
+                  ]}
+                  onPress={() => toggleExpandWord(item.id)}
+                  activeOpacity={0.85}
+                  testID={`word-card-${item.id}`}
+                >
+                  {/* Compact Header Row */}
                   <View style={styles.cardTop}>
                     <View style={styles.wordInfo}>
                       <View style={styles.wordHeaderRow}>
@@ -149,51 +176,88 @@ export const WordBankScreen: React.FC = () => {
                             {item.jlptLevel}
                           </Text>
                         </View>
+                        <Text style={styles.readingText}>
+                          {item.reading} · {item.romaji}
+                        </Text>
                       </View>
-                      <Text style={styles.readingText}>
-                        {item.reading} · {item.romaji}
+                      <Text style={styles.meaningText} numberOfLines={isExpanded ? undefined : 1}>
+                        {item.meaning}
                       </Text>
                     </View>
-                    <TouchableOpacity
-                      style={[styles.audioButton, isPlaying && styles.audioButtonPlaying]}
-                      onPress={() => handlePlayWord(item.id, item.word)}
-                      activeOpacity={0.7}
-                      testID={`play-word-${item.id}`}
-                    >
+
+                    {/* Actions: Audio Button & Accordion Chevron */}
+                    <View style={styles.cardActions}>
+                      <TouchableOpacity
+                        style={[styles.audioButton, isPlaying && styles.audioButtonPlaying]}
+                        onPress={() => handlePlayWord(item.id, item.word)}
+                        activeOpacity={0.7}
+                        testID={`play-word-${item.id}`}
+                        hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                      >
+                        <Ionicons
+                          name={isPlaying ? 'volume-high' : 'volume-medium-outline'}
+                          size={18}
+                          color={isPlaying ? '#ffffff' : theme.colors.brand.light}
+                        />
+                      </TouchableOpacity>
                       <Ionicons
-                        name={isPlaying ? 'volume-high' : 'volume-medium-outline'}
-                        size={20}
-                        color={isPlaying ? '#ffffff' : theme.colors.brand.light}
+                        name={isExpanded ? 'chevron-up' : 'chevron-down'}
+                        size={18}
+                        color={theme.colors.text.subtle}
+                        style={styles.chevronIcon}
                       />
-                    </TouchableOpacity>
+                    </View>
                   </View>
 
-                  <View style={styles.definitionBox}>
-                    <Text style={styles.meaningText}>{item.meaning}</Text>
-                    <Text style={styles.posText}>{item.partOfSpeech}</Text>
-                  </View>
-
-                  {item.examples && item.examples.length > 0 && (
-                    <View style={styles.exampleBox}>
-                      <View style={styles.exampleHeaderRow}>
-                        <Text style={styles.exampleJa}>{item.examples[0].japanese}</Text>
-                        <TouchableOpacity
-                          onPress={() =>
-                            handlePlayWord(`ex-${item.id}`, item.examples[0].japanese)
-                          }
-                          hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                        >
-                          <Ionicons
-                            name="volume-medium-outline"
-                            size={16}
-                            color={theme.colors.brand.light}
-                          />
-                        </TouchableOpacity>
+                  {/* Expanded Accordion Body */}
+                  {isExpanded && (
+                    <View style={styles.expandedSection}>
+                      <View style={styles.metadataRow}>
+                        <View style={styles.posPill}>
+                          <Text style={styles.posPillText}>{item.partOfSpeech}</Text>
+                        </View>
+                        {item.sourceLessonTopic ? (
+                          <Text style={styles.sourceTopicText}>
+                            Learned in: {item.sourceLessonTopic}
+                          </Text>
+                        ) : null}
                       </View>
-                      <Text style={styles.exampleEn}>{item.examples[0].english}</Text>
+
+                      {item.examples && item.examples.length > 0 && (
+                        <View style={styles.examplesContainer}>
+                          <Text style={styles.examplesHeading}>
+                            Context Examples ({item.examples.length}):
+                          </Text>
+                          {item.examples.map((ex, exIdx) => {
+                            const isExPlaying = playingId === `ex-${item.id}-${exIdx}`;
+                            return (
+                              <View key={`ex-${exIdx}`} style={styles.exampleItem}>
+                                <View style={styles.exampleHeaderRow}>
+                                  <Text style={styles.exampleNumber}>0{exIdx + 1}</Text>
+                                  <TouchableOpacity
+                                    onPress={() =>
+                                      handlePlayWord(`ex-${item.id}-${exIdx}`, ex.japanese)
+                                    }
+                                    hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                                    style={styles.exampleAudioBtn}
+                                  >
+                                    <Ionicons
+                                      name={isExPlaying ? 'volume-high' : 'volume-medium-outline'}
+                                      size={14}
+                                      color={isExPlaying ? theme.colors.brand.primary : theme.colors.brand.light}
+                                    />
+                                  </TouchableOpacity>
+                                </View>
+                                <Text style={styles.exampleJa}>{ex.japanese}</Text>
+                                <Text style={styles.exampleEn}>{ex.english}</Text>
+                              </View>
+                            );
+                          })}
+                        </View>
+                      )}
                     </View>
                   )}
-                </View>
+                </TouchableOpacity>
               );
             })
           )}
@@ -303,49 +367,65 @@ const styles = StyleSheet.create({
   },
   wordCard: {
     backgroundColor: theme.colors.background.card,
-    borderRadius: theme.borderRadius.xl,
-    padding: theme.spacing.lg,
+    borderRadius: theme.borderRadius.lg,
+    padding: theme.spacing.md,
     borderWidth: 1,
     borderColor: theme.colors.background.cardBorder,
+  },
+  wordCardExpanded: {
+    borderColor: theme.colors.brand.primary,
+    backgroundColor: theme.colors.background.elevated,
   },
   cardTop: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: theme.spacing.sm,
+    alignItems: 'center',
   },
   wordInfo: {
     flex: 1,
+    paddingRight: theme.spacing.sm,
   },
   wordHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: theme.spacing.sm,
+    flexWrap: 'wrap',
+    gap: theme.spacing.xs + 2,
+    marginBottom: 4,
   },
   kanjiText: {
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: '700',
     color: theme.colors.text.primary,
   },
   levelBadge: {
-    paddingHorizontal: theme.spacing.xs + 2,
+    paddingHorizontal: 6,
     paddingVertical: 1,
     borderRadius: theme.borderRadius.sm,
     borderWidth: 1,
   },
   levelBadgeText: {
-    fontSize: theme.typography.sizes.caption,
+    fontSize: theme.typography.sizes.micro,
     fontWeight: theme.typography.weights.bold,
   },
   readingText: {
     fontSize: theme.typography.sizes.caption,
     color: theme.colors.brand.light,
-    marginTop: 2,
     fontWeight: theme.typography.weights.medium,
   },
+  meaningText: {
+    fontSize: theme.typography.sizes.bodySm,
+    color: theme.colors.text.secondary,
+    fontWeight: theme.typography.weights.medium,
+    lineHeight: 18,
+  },
+  cardActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.xs + 2,
+  },
   audioButton: {
-    width: 36,
-    height: 36,
+    width: 34,
+    height: 34,
     borderRadius: theme.borderRadius.round,
     backgroundColor: 'rgba(225, 29, 72, 0.12)',
     alignItems: 'center',
@@ -356,47 +436,77 @@ const styles = StyleSheet.create({
   audioButtonPlaying: {
     backgroundColor: theme.colors.brand.primary,
   },
-  definitionBox: {
+  chevronIcon: {
+    marginLeft: 2,
+  },
+  expandedSection: {
+    marginTop: theme.spacing.md,
+    paddingTop: theme.spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: theme.colors.background.cardBorder,
+  },
+  metadataRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: theme.spacing.xs + 2,
-    marginBottom: theme.spacing.xs,
+    justifyContent: 'space-between',
+    marginBottom: theme.spacing.sm,
   },
-  meaningText: {
-    fontSize: theme.typography.sizes.body,
-    fontWeight: theme.typography.weights.semibold,
-    color: theme.colors.text.primary,
-    flex: 1,
+  posPill: {
+    backgroundColor: 'rgba(51, 65, 85, 0.6)',
+    paddingHorizontal: theme.spacing.xs + 4,
+    paddingVertical: 2,
+    borderRadius: theme.borderRadius.sm,
   },
-  posText: {
-    fontSize: theme.typography.sizes.caption,
+  posPillText: {
+    fontSize: theme.typography.sizes.micro,
+    color: theme.colors.text.muted,
+    fontWeight: theme.typography.weights.medium,
+  },
+  sourceTopicText: {
+    fontSize: theme.typography.sizes.micro,
     color: theme.colors.text.subtle,
     fontStyle: 'italic',
   },
-  exampleBox: {
+  examplesContainer: {
+    gap: theme.spacing.sm,
+  },
+  examplesHeading: {
+    fontSize: theme.typography.sizes.caption,
+    fontWeight: theme.typography.weights.bold,
+    color: theme.colors.text.muted,
+    marginBottom: 2,
+  },
+  exampleItem: {
     backgroundColor: 'rgba(15, 23, 42, 0.6)',
     borderRadius: theme.borderRadius.md,
     padding: theme.spacing.sm,
     borderLeftWidth: 3,
     borderLeftColor: theme.colors.brand.primary,
-    marginTop: theme.spacing.xs,
   },
   exampleHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    marginBottom: 2,
+  },
+  exampleNumber: {
+    fontSize: theme.typography.sizes.micro,
+    fontWeight: theme.typography.weights.bold,
+    color: theme.colors.brand.light,
+  },
+  exampleAudioBtn: {
+    padding: 2,
   },
   exampleJa: {
     fontSize: theme.typography.sizes.bodySm,
-    color: theme.colors.text.secondary,
-    flex: 1,
-    paddingRight: theme.spacing.xs,
+    color: theme.colors.text.primary,
+    lineHeight: 20,
+    marginBottom: 2,
   },
   exampleEn: {
     fontSize: theme.typography.sizes.caption,
     color: theme.colors.text.muted,
-    marginTop: 2,
+    lineHeight: 16,
   },
   emptyState: {
     alignItems: 'center',

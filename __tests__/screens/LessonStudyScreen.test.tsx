@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react-native';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react-native';
 import { LessonStudyScreen } from '../../src/screens/LessonStudyScreen';
 import { DailyLesson } from '../../src/types/domain';
 import { storageService } from '../../src/services';
@@ -226,5 +226,129 @@ describe('LessonStudyScreen', () => {
       'いらっしゃいませ。ご注文はお決まりですか？',
       expect.any(Object)
     );
+  });
+
+  it('renders distinct speaker testIDs and badges on dialogue bubbles', async () => {
+    render(
+      <LessonStudyScreen
+        navigation={mockNavigation}
+        route={{ params: { lesson: mockLesson, initialScreen: 'dialogue' } } as any}
+      />
+    );
+
+    const bubble1 = screen.getByTestId('dialogue-bubble-1');
+    const bubble2 = screen.getByTestId('dialogue-bubble-2');
+    expect(bubble1).toBeTruthy();
+    expect(bubble2).toBeTruthy();
+    expect(screen.getByText('店員 (Staff)')).toBeTruthy();
+    expect(screen.getByText('客 (Customer)')).toBeTruthy();
+  });
+
+  it('renders passage loading card when passage is pending and sentences are not yet ready', async () => {
+    const pendingLesson: DailyLesson = {
+      ...mockLesson,
+      sentences: [],
+      passage: undefined,
+    };
+
+    render(
+      <LessonStudyScreen
+        navigation={mockNavigation}
+        route={{
+          params: {
+            lesson: pendingLesson,
+            initialScreen: 'dialogue',
+            isPassagePending: true,
+          },
+        } as any}
+      />
+    );
+
+    expect(screen.getByTestId('passage-loading-card')).toBeTruthy();
+    expect(screen.getByText('Writing Conversation Dialogue...')).toBeTruthy();
+  });
+
+  it('triggers force-save, records word practice, and shows celebration when Lesson Complete is pressed', async () => {
+    const saveSpy = jest.spyOn(storageService, 'saveLesson').mockResolvedValue(mockLesson);
+    const recordPracticeSpy = jest.spyOn(storageService, 'recordWordPractice').mockResolvedValue();
+
+    render(
+      <LessonStudyScreen
+        navigation={mockNavigation}
+        route={{ params: { lesson: mockLesson, initialScreen: 'dialogue' } } as any}
+      />
+    );
+
+    const completeBtn = screen.getByTestId('lesson-complete-btn');
+    fireEvent.press(completeBtn);
+
+    expect(screen.getByTestId('celebration-banner')).toBeTruthy();
+    expect(screen.getByText('🎉 Lesson Complete!')).toBeTruthy();
+    await waitFor(() => {
+      expect(saveSpy).toHaveBeenCalledWith(mockLesson);
+      expect(recordPracticeSpy).toHaveBeenCalledWith(['注文', 'おすすめ']);
+    });
+  });
+
+  it('defaults Furigana mode to hidden when isPracticePassage is true', async () => {
+    render(
+      <LessonStudyScreen
+        navigation={mockNavigation}
+        route={{
+          params: {
+            lesson: mockLesson,
+            initialScreen: 'dialogue',
+            isPracticePassage: true,
+          },
+        } as any}
+      />
+    );
+
+    await waitFor(() => {
+      // In dialogue tab with isPracticePassage, dialogue renders with furigana mode hidden by default
+      expect(screen.getByTestId('dialogue-bubble-1')).toBeTruthy();
+      expect(screen.getByText('店員 (Staff)')).toBeTruthy();
+    });
+  });
+
+  it('opens WordTooltipModal when tapping a highlighted target word in the dialogue', async () => {
+    const playSentenceSpy = jest.spyOn(audioProvider, 'playSentence').mockResolvedValue();
+
+    render(
+      <LessonStudyScreen
+        navigation={mockNavigation}
+        route={{ params: { lesson: mockLesson, initialScreen: 'dialogue' } } as any}
+      />
+    );
+
+    // Initial state: tooltip not open
+    expect(screen.queryByTestId('word-tooltip-card')).toBeNull();
+
+    // Tap on the highlighted target token "注文"
+    const targetToken = screen.getByTestId('target-token-注文');
+    expect(targetToken).toBeTruthy();
+    fireEvent.press(targetToken);
+
+    // Tooltip modal opens with furigana, romaji, and english definition
+    const tooltipCard = screen.getByTestId('word-tooltip-card');
+    expect(tooltipCard).toBeTruthy();
+    const cardScope = within(tooltipCard);
+    expect(cardScope.getByTestId('tooltip-word-surface')).toBeTruthy();
+    expect(cardScope.getByText('注文')).toBeTruthy();
+    expect(cardScope.getByText('【ちゅうもん】')).toBeTruthy();
+    expect(cardScope.getByText('chuumon')).toBeTruthy();
+    expect(cardScope.getByText('an order (for food/goods)')).toBeTruthy();
+
+    // Test playing audio from tooltip
+    const listenBtn = screen.getByTestId('tooltip-listen-btn');
+    fireEvent.press(listenBtn);
+    expect(playSentenceSpy).toHaveBeenCalledWith('注文', expect.any(Object));
+
+    // Close the tooltip
+    const closeBtn = screen.getByTestId('close-tooltip-btn');
+    fireEvent.press(closeBtn);
+
+    // Tooltip is dismissed
+    expect(screen.queryByTestId('word-tooltip-card')).toBeNull();
   });
 });

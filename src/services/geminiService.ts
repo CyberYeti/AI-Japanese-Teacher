@@ -10,6 +10,7 @@ import {
   JLPTLevel,
   PassageSentence,
   SentenceToken,
+  SpeakerInfo,
   TargetWord,
   WordExample,
 } from '../types/domain';
@@ -51,14 +52,23 @@ export interface GenerateLessonOptions {
   level: JLPTLevel;
   topic: string;
   customInstruction?: string;
+  excludeWords?: string[];
   fetchFn?: typeof fetch;
   model?: string;
 }
 
+// Configured active Gemini models - validated and supported in current environment (see CONTEXT.md)
 const DEFAULT_MODEL = 'gemini-3.5-flash-lite';
 const FALLBACK_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.6-flash', 'gemini-3.7-flash', 'gemini-3.5-flash'];
-// const FALLBACK_MODELS = ['gemini-3.7-flash'];
 const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
+
+export const levelGuidelines: Record<JLPTLevel, string> = {
+  N5: 'Absolute beginner: basic sentence patterns (です/ます, ~たい, ~てください), essential particles (は, が, を, に, で, と), basic greetings and everyday items.',
+  N4: 'Elementary: te-form combinations (~ている, ~てから), conditionals (~たら, ~ば), potential form, basic transitivity, daily situations.',
+  N3: 'Intermediate: natural spoken expressions, basic honorific/humble language (keigo), compound sentences, nuanced conjunctions, opinion expressions.',
+  N2: 'Upper-intermediate: business and formal Japanese, abstract discussions, advanced grammar structures (~わけではない, ~にすぎない), varied registers.',
+  N1: 'Advanced: sophisticated literary expressions, formal discourse, nuanced idioms, specialized terminology.',
+};
 
 /**
  * Constructs the system and user prompt for structured lesson generation.
@@ -66,22 +76,20 @@ const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/models
 export function buildPrompt(
   level: JLPTLevel,
   topic: string,
-  customInstruction?: string
+  customInstruction?: string,
+  excludeWords?: string[]
 ): string {
-  const levelGuidelines: Record<JLPTLevel, string> = {
-    N5: 'Absolute beginner: basic sentence patterns (です/ます, ~たい, ~てください), essential particles (は, が, を, に, で, と), basic greetings and everyday items.',
-    N4: 'Elementary: te-form combinations (~ている, ~てから), conditionals (~たら, ~ば), potential form, basic transitivity, daily situations.',
-    N3: 'Intermediate: natural spoken expressions, basic honorific/humble language (keigo), compound sentences, nuanced conjunctions, opinion expressions.',
-    N2: 'Upper-intermediate: business and formal Japanese, abstract discussions, advanced grammar structures (~わけではない, ~にすぎない), varied registers.',
-    N1: 'Advanced: sophisticated literary expressions, formal discourse, nuanced idioms, specialized terminology.',
-  };
+  const exclusionNote =
+    excludeWords && excludeWords.length > 0
+      ? `\nEXCLUDED VOCABULARY: Do NOT use any of the following already-learned words as targetVocabulary items: ${excludeWords.join(', ')}`
+      : '';
 
   return `You are a master Japanese language educator.
 Generate a daily Japanese lesson tailored to the learner's specified JLPT level and topic.
 
 Target Level: JLPT ${level} (${levelGuidelines[level]})
 Topic: ${topic}
-${customInstruction ? `Additional Instruction: ${customInstruction}` : ''}
+${customInstruction ? `Additional Instruction: ${customInstruction}` : ''}${exclusionNote}
 
 CRITICAL REQUIREMENTS:
 1. Curate 3 to 5 semantically cohesive vocabulary words ('targetVocabulary') that naturally fit the given topic and JLPT level.
@@ -191,6 +199,260 @@ export function buildResponseSchema(): Record<string, unknown> {
   };
 }
 
+export function buildTargetVocabularyPrompt(
+  level: JLPTLevel,
+  topic: string,
+  customInstruction?: string,
+  excludeWords?: string[]
+): string {
+  const exclusionNote =
+    excludeWords && excludeWords.length > 0
+      ? `\nEXCLUDED VOCABULARY: Do NOT use any of the following already-learned words as targetVocabulary items: ${excludeWords.join(', ')}`
+      : '';
+
+  return `You are a master Japanese language educator.
+Curate a cohesive target vocabulary set (3 to 5 words) for a daily Japanese study session.
+
+Target Level: JLPT ${level} (${levelGuidelines[level]})
+Topic: ${topic}
+${customInstruction ? `Additional Instruction: ${customInstruction}` : ''}${exclusionNote}
+
+CRITICAL REQUIREMENTS:
+1. Curate 3 to 5 semantically cohesive vocabulary words ('targetVocabulary') that naturally fit the given topic and JLPT level.
+   Each target word MUST include:
+   - word: Kanji/Kana surface (e.g. "注文")
+   - reading: Full hiragana reading (e.g. "ちゅうもん")
+   - romaji: Standard Hepburn romaji (e.g. "chuumon")
+   - meaning: Clear English definition
+   - partOfSpeech: Part of speech (e.g. "noun / suru-verb")
+   - examples: Array of EXACTLY 3 contextual Japanese example sentences with readings and English translations.
+
+2. Generate a thematic lesson title and breakdown into titleTokens with Furigana readings for Kanji.
+
+3. Return ONLY a valid JSON object strictly adhering to the schema.`;
+}
+
+export function buildTargetVocabularySchema(): Record<string, unknown> {
+  return {
+    type: 'OBJECT',
+    properties: {
+      topic: { type: 'STRING' },
+      level: { type: 'STRING', enum: ['N5', 'N4', 'N3', 'N2', 'N1'] },
+      themeDescription: { type: 'STRING' },
+      title: { type: 'STRING' },
+      titleTokens: {
+        type: 'ARRAY',
+        items: {
+          type: 'OBJECT',
+          properties: {
+            surface: { type: 'STRING' },
+            reading: { type: 'STRING' },
+            isTarget: { type: 'BOOLEAN' },
+          },
+          required: ['surface', 'reading', 'isTarget'],
+        },
+      },
+      targetVocabulary: {
+        type: 'ARRAY',
+        items: {
+          type: 'OBJECT',
+          properties: {
+            word: { type: 'STRING' },
+            reading: { type: 'STRING' },
+            romaji: { type: 'STRING' },
+            meaning: { type: 'STRING' },
+            partOfSpeech: { type: 'STRING' },
+            examples: {
+              type: 'ARRAY',
+              items: {
+                type: 'OBJECT',
+                properties: {
+                  japanese: { type: 'STRING' },
+                  reading: { type: 'STRING' },
+                  english: { type: 'STRING' },
+                },
+                required: ['japanese', 'reading', 'english'],
+              },
+            },
+          },
+          required: ['word', 'reading', 'romaji', 'meaning', 'partOfSpeech'],
+        },
+      },
+    },
+    required: ['topic', 'level', 'title', 'titleTokens', 'targetVocabulary'],
+  };
+}
+
+export function buildPassagePrompt(
+  targetVocabulary: TargetWord[],
+  topic: string,
+  level: JLPTLevel,
+  customInstruction?: string,
+  reviewWords?: TargetWord[]
+): string {
+  const wordsList = targetVocabulary
+    .map((v) => `${v.word} (${v.reading} - ${v.meaning})`)
+    .join(', ');
+
+  const reviewWordsText =
+    reviewWords && reviewWords.length > 0
+      ? `\n\nSECONDARY REVIEW VOCABULARY (Weave in as many as naturally fit without forcing):
+${reviewWords.map((v) => `${v.word} (${v.reading} - ${v.meaning})`).join(', ')}`
+      : '';
+
+  return `You are a master Japanese language educator.
+Generate an authentic Japanese dialogue passage (4 to 8 sentences) for JLPT ${level} level on the topic "${topic}".
+
+MANDATORY REQUIREMENTS:
+1. Natural dialogue roleplay between 2 distinct speakers (Speaker A and Speaker B), with optional Narrator.
+2. Incorporate ALL of the following target vocabulary words naturally in context:
+${wordsList}${reviewWordsText}
+${customInstruction ? `Additional Instruction: ${customInstruction}` : ''}
+
+3. Each sentence in the passage MUST have:
+   - id: 1-indexed sequential number
+   - speaker: Name or role of speaker (e.g. "店員 (Staff)", "田中 (Tanaka)")
+   - speakerId: "A" or "B" or "narrator"
+   - japanese: Clean Japanese text for speech synthesis
+   - english: Natural English translation
+   - tokens: Array of word tokens breaking down the sentence for Furigana display.
+     Every token has 'surface' (displayed text), 'reading' (Hiragana reading for Kanji, or "" for Kana/punctuation), and 'isTarget' (true if token matches one of the target or review words).
+
+4. Return ONLY a valid JSON object strictly adhering to the schema.`;
+}
+
+export function buildPracticePassagePrompt(
+  words: TargetWord[],
+  level: JLPTLevel,
+  topic?: string,
+  customInstruction?: string
+): string {
+  const chosenTopic = topic && topic.trim() ? topic.trim() : 'Natural Japanese Conversation';
+  const wordsList = words
+    .map((v) => `${v.word} (${v.reading} - ${v.meaning})`)
+    .join(', ');
+
+  return `You are a master Japanese educator and conversational storyteller.
+Create an engaging, natural dialogue or short passage for a JLPT ${level} learner practicing vocabulary from their Word Bank.
+
+Target Level: JLPT ${level} (${levelGuidelines[level]})
+Topic / Scenario: ${chosenTopic}
+Available Word Bank Vocabulary: ${wordsList}
+${customInstruction ? `Additional Instruction: ${customInstruction}` : ''}
+
+CRITICAL PEDAGOGICAL REQUIREMENTS:
+1. READABILITY IS THE PARAMOUNT GOAL: Write smooth, natural, authentic Japanese dialogue. Do NOT force or cram words if it makes the phrasing awkward or unnatural.
+2. Incorporate as many of the provided focus vocabulary words as fit naturally and fluidly into the dialogue.
+3. Length: 4 to 8 authentic conversational turns or narrative sentences.
+4. Each sentence MUST have:
+   - id: 1-indexed number
+   - speaker: Name/role of speaker (e.g. "店員", "田中", "客", "Narrator")
+   - speakerId: "A" or "B" or "narrator"
+   - japanese: Clean Japanese text for speech synthesis
+   - english: Natural English translation
+   - tokens: Array of tokens with 'surface', 'reading' (Hiragana reading for Kanji, or "" for Kana/punctuation), and 'isTarget' (true if this token matches one of the focus vocabulary words).
+
+5. Return ONLY a valid JSON object strictly adhering to the schema.`;
+}
+
+export function buildPracticePassageSchema(): Record<string, unknown> {
+  return {
+    type: 'OBJECT',
+    properties: {
+      title: { type: 'STRING' },
+      titleTokens: {
+        type: 'ARRAY',
+        items: {
+          type: 'OBJECT',
+          properties: {
+            surface: { type: 'STRING' },
+            reading: { type: 'STRING' },
+            isTarget: { type: 'BOOLEAN' },
+          },
+          required: ['surface', 'reading', 'isTarget'],
+        },
+      },
+      themeDescription: { type: 'STRING' },
+      sentences: {
+        type: 'ARRAY',
+        items: {
+          type: 'OBJECT',
+          properties: {
+            id: { type: 'INTEGER' },
+            speaker: { type: 'STRING' },
+            speakerId: { type: 'STRING' },
+            japanese: { type: 'STRING' },
+            english: { type: 'STRING' },
+            tokens: {
+              type: 'ARRAY',
+              items: {
+                type: 'OBJECT',
+                properties: {
+                  surface: { type: 'STRING' },
+                  reading: { type: 'STRING' },
+                  isTarget: { type: 'BOOLEAN' },
+                },
+                required: ['surface', 'reading', 'isTarget'],
+              },
+            },
+          },
+          required: ['id', 'japanese', 'english', 'tokens'],
+        },
+      },
+    },
+    required: ['title', 'titleTokens', 'sentences'],
+  };
+}
+
+export function buildPassageSchema(): Record<string, unknown> {
+  return {
+    type: 'OBJECT',
+    properties: {
+      sentences: {
+        type: 'ARRAY',
+        items: {
+          type: 'OBJECT',
+          properties: {
+            id: { type: 'INTEGER' },
+            speaker: { type: 'STRING' },
+            speakerId: { type: 'STRING' },
+            japanese: { type: 'STRING' },
+            english: { type: 'STRING' },
+            tokens: {
+              type: 'ARRAY',
+              items: {
+                type: 'OBJECT',
+                properties: {
+                  surface: { type: 'STRING' },
+                  reading: { type: 'STRING' },
+                  isTarget: { type: 'BOOLEAN' },
+                },
+                required: ['surface', 'reading', 'isTarget'],
+              },
+            },
+          },
+          required: ['id', 'japanese', 'english', 'tokens'],
+        },
+      },
+    },
+    required: ['sentences'],
+  };
+}
+
+export interface TargetVocabularyResult {
+  topic: string;
+  level: JLPTLevel;
+  themeDescription: string;
+  title: string;
+  titleTokens: SentenceToken[];
+  targetVocabulary: TargetWord[];
+}
+
+export interface PassageResult {
+  sentences: PassageSentence[];
+  speakers?: SpeakerInfo[];
+}
+
 /**
  * Parses and validates raw response into a structured DailyLesson domain model.
  */
@@ -202,7 +464,6 @@ export function parseAndValidateLessonResponse(
 
   if (typeof raw === 'string') {
     let cleanJson = raw.trim();
-    // Strip markdown code fences if returned
     if (cleanJson.startsWith('```json')) {
       cleanJson = cleanJson.slice(7);
     } else if (cleanJson.startsWith('```')) {
@@ -293,55 +554,397 @@ export function parseAndValidateLessonResponse(
   };
 }
 
-/**
- * Validates a user's Gemini API key by making a lightweight model list request.
- */
-export function validateApiKey(
-  apiKey: string,
-  fetchFn: typeof fetch = fetch
-): Promise<boolean> {
-  const trimmed = apiKey?.trim();
-  if (!trimmed) {
-    return Promise.resolve(false);
+export function parseAndValidateTargetVocabularyResponse(
+  raw: unknown,
+  metadata: { topic: string; level: JLPTLevel }
+): TargetVocabularyResult {
+  let parsed: any = raw;
+
+  if (typeof raw === 'string') {
+    let cleanJson = raw.trim();
+    if (cleanJson.startsWith('```json')) cleanJson = cleanJson.slice(7);
+    else if (cleanJson.startsWith('```')) cleanJson = cleanJson.slice(3);
+    if (cleanJson.endsWith('```')) cleanJson = cleanJson.slice(0, -3);
+    cleanJson = cleanJson.trim();
+
+    try {
+      parsed = JSON.parse(cleanJson);
+    } catch (err) {
+      throw new GeminiParseError('Failed to parse Gemini response as JSON.', raw);
+    }
   }
 
-  const url = `${GEMINI_BASE_URL}?key=${encodeURIComponent(trimmed)}`;
+  if (!parsed || typeof parsed !== 'object') {
+    throw new GeminiParseError('Gemini response is not a valid object.', parsed);
+  }
 
-  return fetchFn(url, {
-    method: 'GET',
-    headers: { 'Content-Type': 'application/json' },
-  })
-    .then((res) => {
-      return res.ok;
-    })
-    .catch(() => {
-      return false;
-    });
+  if (!Array.isArray(parsed.targetVocabulary) || parsed.targetVocabulary.length === 0) {
+    throw new GeminiParseError('Gemini response is missing targetVocabulary.', parsed);
+  }
+
+  const validatedVocabulary: TargetWord[] = parsed.targetVocabulary.map((v: any) => ({
+    word: String(v.word || ''),
+    reading: String(v.reading || ''),
+    romaji: String(v.romaji || ''),
+    meaning: String(v.meaning || ''),
+    partOfSpeech: String(v.partOfSpeech || 'word'),
+    examples: Array.isArray(v.examples)
+      ? v.examples.map((ex: any) => ({
+        japanese: String(ex.japanese || ''),
+        reading: String(ex.reading || ''),
+        english: String(ex.english || ''),
+      }))
+      : [],
+  }));
+
+  const validatedTitleTokens: SentenceToken[] = Array.isArray(parsed.titleTokens)
+    ? parsed.titleTokens.map((t: any) => ({
+      surface: String(t.surface || ''),
+      reading: String(t.reading || ''),
+      isTarget: Boolean(t.isTarget),
+    }))
+    : [{ surface: String(parsed.title || metadata.topic), reading: '', isTarget: false }];
+
+  return {
+    topic: parsed.topic || metadata.topic,
+    level: (parsed.level as JLPTLevel) || metadata.level,
+    themeDescription:
+      parsed.themeDescription || `Daily study session for ${metadata.topic}`,
+    title: parsed.title || metadata.topic,
+    titleTokens: validatedTitleTokens,
+    targetVocabulary: validatedVocabulary,
+  };
+}
+
+export function parseAndValidatePassageResponse(raw: unknown): PassageResult {
+  let parsed: any = raw;
+
+  if (typeof raw === 'string') {
+    let cleanJson = raw.trim();
+    if (cleanJson.startsWith('```json')) cleanJson = cleanJson.slice(7);
+    else if (cleanJson.startsWith('```')) cleanJson = cleanJson.slice(3);
+    if (cleanJson.endsWith('```')) cleanJson = cleanJson.slice(0, -3);
+    cleanJson = cleanJson.trim();
+
+    try {
+      parsed = JSON.parse(cleanJson);
+    } catch (err) {
+      throw new GeminiParseError('Failed to parse Gemini passage response as JSON.', raw);
+    }
+  }
+
+  if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.sentences) || parsed.sentences.length === 0) {
+    throw new GeminiParseError('Gemini passage response is missing sentences.', parsed);
+  }
+
+  const validatedSentences: PassageSentence[] = parsed.sentences.map((s: any, idx: number) => ({
+    id: typeof s.id === 'number' ? s.id : idx + 1,
+    speaker: s.speaker ? String(s.speaker) : undefined,
+    speakerId: s.speakerId ? String(s.speakerId) : idx % 2 === 0 ? 'A' : 'B',
+    japanese: String(s.japanese || ''),
+    english: String(s.english || ''),
+    tokens: Array.isArray(s.tokens)
+      ? s.tokens.map((t: any) => ({
+        surface: String(t.surface || ''),
+        reading: String(t.reading || ''),
+        isTarget: Boolean(t.isTarget),
+      }))
+      : [{ surface: String(s.japanese || ''), reading: '', isTarget: false }],
+  }));
+
+  return {
+    sentences: validatedSentences,
+  };
+}
+
+export function buildWordImportPrompt(words: string[], level: JLPTLevel): string {
+  return `You are a master Japanese lexicographer and educator.
+Enrich the following list of Japanese vocabulary items into complete, structured dictionary entries suitable for JLPT ${level} study:
+Words to enrich: ${words.join(', ')}
+
+REQUIREMENTS FOR EACH WORD:
+- word: Clean Kanji/Kana surface (e.g. "注文")
+- reading: Full hiragana reading (e.g. "ちゅうもん")
+- romaji: Standard Hepburn romaji (e.g. "chuumon")
+- meaning: Clear concise English definition
+- partOfSpeech: Accurate part of speech (e.g. "noun / suru-verb", "i-adjective", "godan verb")
+- examples: Array of EXACTLY 3 authentic, natural contextual Japanese example sentences with readings and English translations.
+
+Return ONLY a valid JSON object strictly adhering to the schema.`;
+}
+
+export function buildWordImportSchema(): Record<string, unknown> {
+  return {
+    type: 'OBJECT',
+    properties: {
+      words: {
+        type: 'ARRAY',
+        items: {
+          type: 'OBJECT',
+          properties: {
+            word: { type: 'STRING' },
+            reading: { type: 'STRING' },
+            romaji: { type: 'STRING' },
+            meaning: { type: 'STRING' },
+            partOfSpeech: { type: 'STRING' },
+            examples: {
+              type: 'ARRAY',
+              items: {
+                type: 'OBJECT',
+                properties: {
+                  japanese: { type: 'STRING' },
+                  reading: { type: 'STRING' },
+                  english: { type: 'STRING' },
+                },
+                required: ['japanese', 'reading', 'english'],
+              },
+            },
+          },
+          required: ['word', 'reading', 'romaji', 'meaning', 'partOfSpeech', 'examples'],
+        },
+      },
+    },
+    required: ['words'],
+  };
+}
+
+export function parseAndValidateWordImportResponse(raw: unknown): TargetWord[] {
+  let parsed: any = raw;
+  if (typeof raw === 'string') {
+    let cleanJson = raw.trim();
+    if (cleanJson.startsWith('```json')) cleanJson = cleanJson.slice(7);
+    else if (cleanJson.startsWith('```')) cleanJson = cleanJson.slice(3);
+    if (cleanJson.endsWith('```')) cleanJson = cleanJson.slice(0, -3);
+    cleanJson = cleanJson.trim();
+
+    try {
+      parsed = JSON.parse(cleanJson);
+    } catch (err) {
+      throw new GeminiParseError('Failed to parse Gemini word import response as JSON.', raw);
+    }
+  }
+
+  const items = Array.isArray(parsed?.words) ? parsed.words : Array.isArray(parsed) ? parsed : [];
+  return items.map((v: any) => ({
+    word: String(v.word || ''),
+    reading: String(v.reading || ''),
+    romaji: String(v.romaji || ''),
+    meaning: String(v.meaning || ''),
+    partOfSpeech: String(v.partOfSpeech || 'word'),
+    examples: Array.isArray(v.examples)
+      ? v.examples.map((ex: any) => ({
+        japanese: String(ex.japanese || ''),
+        reading: String(ex.reading || ''),
+        english: String(ex.english || ''),
+      }))
+      : [],
+  }));
 }
 
 /**
- * Generates a full DailyLesson using Gemini API or offline mock generator.
+ * Intelligently extracts individual Japanese target words/Kanji from raw text.
+ * Supports:
+ * - Simple comma/newline/space separated lists (e.g. "注文, 予約, 店員")
+ * - Line-by-line formatted study entries (e.g. "かいます 【買います】 (kaimasu) — To buy" -> "買います")
+ * - Single-line comma-separated entries with English notes (e.g. "食べる (to eat), 飲む (to drink), 行く (to go)")
+ * - Inline numbered lists (e.g. "1. 注文 2. 予約 3. 店員")
  */
-export async function generateLesson(
-  options: GenerateLessonOptions
-): Promise<DailyLesson> {
-  const {
-    apiKey,
-    level,
-    topic,
-    customInstruction,
-    fetchFn = fetch,
-    model = DEFAULT_MODEL,
-  } = options;
+export function parseRawWordList(rawInput: string): string[] {
+  if (!rawInput || typeof rawInput !== 'string') return [];
 
-  if (!apiKey || apiKey.trim() === '') {
-    // Return offline mock lesson when no API key provided
-    return getMockLesson(level, topic);
+  // Split input into logical entry chunks respecting brackets/parentheses and delimiters
+  const chunks: string[] = [];
+  let current = '';
+  let parenDepth = 0;
+  let bracketDepth = 0;
+
+  for (let i = 0; i < rawInput.length; i++) {
+    const char = rawInput[i];
+
+    if (char === '(' || char === '（') {
+      parenDepth++;
+      current += char;
+    } else if (char === ')' || char === '）') {
+      if (parenDepth > 0) parenDepth--;
+      current += char;
+    } else if (char === '[' || char === '【' || char === '「') {
+      bracketDepth++;
+      current += char;
+    } else if (char === ']' || char === '】' || char === '」') {
+      if (bracketDepth > 0) bracketDepth--;
+      current += char;
+    } else if (
+      (char === '\n' || char === '\r' || char === ',' || char === '，' || char === '、' || char === ';' || char === '；') &&
+      parenDepth === 0 &&
+      bracketDepth === 0
+    ) {
+      if (current.trim().length > 0) {
+        chunks.push(current.trim());
+      }
+      current = '';
+    } else {
+      current += char;
+    }
   }
 
-  const promptText = buildPrompt(level, topic, customInstruction);
-  const responseSchema = buildResponseSchema();
+  if (current.trim().length > 0) {
+    chunks.push(current.trim());
+  }
 
+  // Also split on inline numbered list markers like "1. 注文 2. 予約 3. 店員"
+  const entryItems: string[] = [];
+  for (const chunk of chunks) {
+    const subChunks = chunk.split(/(?<=\S)\s+(?=\d+[\.\)])/);
+    for (const sc of subChunks) {
+      if (sc.trim().length > 0) {
+        entryItems.push(sc.trim());
+      }
+    }
+  }
+
+  if (entryItems.length === 0) return [];
+
+  const kanjiRegex = /[\u3400-\u4dbf\u4e00-\u9fff]/;
+  const extractedWords: string[] = [];
+
+  for (const item of entryItems) {
+    // 1. If entry has 【...】 or [...] or 「...」 with Japanese characters inside, prefer the bracketed word
+    const bracketMatch = item.match(
+      /【([\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]+)】|\[([\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]+)\]|「([\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]+)」/
+    );
+    if (bracketMatch) {
+      const wordInBrackets = (bracketMatch[1] || bracketMatch[2] || bracketMatch[3] || '').trim();
+      if (wordInBrackets.length > 0) {
+        extractedWords.push(wordInBrackets);
+        continue;
+      }
+    }
+
+    // 2. Strip bullet prefixes like "1. ", "1) ", "* ", "- "
+    const cleanItem = item.replace(/^\s*(\d+[\.\)]|[-*•])\s+/, '').trim();
+
+    // 3. Look for continuous Japanese segments (Kanji/Kana)
+    const japaneseSegments = cleanItem.match(/[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]+/g);
+    if (japaneseSegments && japaneseSegments.length > 0) {
+      const hasSeparators = /[—–\-:：/|~～(（]/.test(cleanItem);
+      const hasEnglish = /[a-zA-Z]/.test(cleanItem);
+
+      if (hasSeparators || hasEnglish) {
+        // Formatted study card item: prefer segment with Kanji if present (e.g. 買います over かいます)
+        const segmentWithKanji = japaneseSegments.find((seg) => kanjiRegex.test(seg));
+        if (segmentWithKanji) {
+          extractedWords.push(segmentWithKanji.trim());
+        } else {
+          extractedWords.push(japaneseSegments[0].trim());
+        }
+      } else {
+        // Plain whitespace-separated Japanese words (e.g. "注文 予約 店員")
+        for (const seg of japaneseSegments) {
+          if (seg.trim().length > 0) {
+            extractedWords.push(seg.trim());
+          }
+        }
+      }
+      continue;
+    }
+
+    // 4. Fallback for non-Japanese plain terms (e.g. "Tokyo", "Osaka")
+    const cleaned = cleanItem
+      .replace(
+        /^[^\w\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]+|[^\w\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]+$/g,
+        ''
+      )
+      .trim();
+    if (cleaned.length > 0) {
+      extractedWords.push(cleaned);
+    }
+  }
+
+  // Deduplicate preserving encounter order
+  return Array.from(new Set(extractedWords));
+}
+
+/**
+ * Batched Plain-Text Word List Importer with LLM Enrichment.
+ */
+export async function importWordList(
+  rawInput: string | string[],
+  level: JLPTLevel,
+  apiKey?: string,
+  onProgress?: (completed: number, total: number) => void,
+  fetchFn: typeof fetch = fetch,
+  model = DEFAULT_MODEL
+): Promise<TargetWord[]> {
+  const uniqueWords = Array.isArray(rawInput)
+    ? Array.from(new Set(rawInput.map((w) => w.trim()).filter((w) => w.length > 0)))
+    : parseRawWordList(rawInput);
+
+  if (uniqueWords.length === 0) {
+    return [];
+  }
+
+  const BATCH_SIZE = 6;
+  const batches: string[][] = [];
+  for (let i = 0; i < uniqueWords.length; i += BATCH_SIZE) {
+    batches.push(uniqueWords.slice(i, i + BATCH_SIZE));
+  }
+
+  const results: TargetWord[] = [];
+  let completed = 0;
+
+  for (const batch of batches) {
+    if (!apiKey || apiKey.trim() === '') {
+      // Mock offline enrichment
+      for (const word of batch) {
+        results.push({
+          word,
+          reading: word,
+          romaji: word.toLowerCase(),
+          meaning: `Imported definition for ${word}`,
+          partOfSpeech: 'noun',
+          examples: [
+            {
+              japanese: `${word}を使います。`,
+              reading: `${word}をつかいます。`,
+              english: `Using the word ${word}.`,
+            },
+          ],
+        });
+      }
+    } else {
+      const prompt = buildWordImportPrompt(batch, level);
+      const schema = buildWordImportSchema();
+      const rawResponse = await callGeminiStructuredApi(prompt, schema, {
+        apiKey,
+        fetchFn,
+        model,
+      });
+      const parsedBatch = parseAndValidateWordImportResponse(rawResponse);
+      results.push(...parsedBatch);
+    }
+
+    completed += batch.length;
+    if (onProgress) {
+      onProgress(completed, uniqueWords.length);
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Internal executor that tries models with fallback cascade for structured Gemini JSON responses.
+ */
+async function callGeminiStructuredApi(
+  promptText: string,
+  responseSchema: Record<string, unknown>,
+  options: {
+    apiKey: string;
+    fetchFn?: typeof fetch;
+    model?: string;
+  }
+): Promise<any> {
+  const { apiKey, fetchFn = fetch, model = DEFAULT_MODEL } = options;
   const modelsToTry = [model, ...FALLBACK_MODELS.filter((m) => m !== model)];
   let lastError: Error | null = null;
 
@@ -382,7 +985,6 @@ export async function generateLesson(
         // ignore
       }
 
-      // If model not found (404), try next model in fallback list
       if (response.status === 404) {
         lastError = new GeminiApiError(
           `Gemini model ${currentModel} not found (404).`,
@@ -401,7 +1003,7 @@ export async function generateLesson(
         ) {
           throw new InvalidApiKeyError(msg);
         }
-        throw new GeminiApiError(`Gemini API error (400): ${msg}`, 400, errorData);
+        throw new GeminiApiError(`Gemini API error (${response.status}): ${msg}`, response.status, errorData);
       }
 
       if (response.status === 429) {
@@ -410,12 +1012,14 @@ export async function generateLesson(
         );
       }
 
-      throw new GeminiApiError(
-        `Gemini API request failed with status ${response.status}: ${errorData?.error?.message || response.statusText
+      lastError = new GeminiApiError(
+        `Gemini API request failed with status ${response.status}: ${
+          errorData?.error?.message || response.statusText
         }`,
         response.status,
         errorData
       );
+      continue;
     }
 
     const jsonResponse: any = await response.json();
@@ -426,10 +1030,223 @@ export async function generateLesson(
       throw new GeminiParseError('Gemini API returned an empty response.', jsonResponse);
     }
 
-    return parseAndValidateLessonResponse(textContent, { topic, level });
+    return textContent;
   }
 
-  throw lastError || new GeminiApiError('Failed to generate lesson with available Gemini models.');
+  throw lastError || new GeminiApiError('Failed to complete request with available Gemini models.');
+}
+
+/**
+ * Validates a user's Gemini API key by making a lightweight model list request.
+ */
+export function validateApiKey(
+  apiKey: string,
+  fetchFn: typeof fetch = fetch
+): Promise<boolean> {
+  const trimmed = apiKey?.trim();
+  if (!trimmed) {
+    return Promise.resolve(false);
+  }
+
+  const url = `${GEMINI_BASE_URL}?key=${encodeURIComponent(trimmed)}`;
+
+  return fetchFn(url, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  })
+    .then((res) => {
+      return res.ok;
+    })
+    .catch(() => {
+      return false;
+    });
+}
+
+/**
+ * Phase 1: Generates target vocabulary and examples rapidly.
+ */
+export async function generateTargetVocabulary(
+  topic: string,
+  level: JLPTLevel,
+  apiKey?: string,
+  customInstruction?: string,
+  excludeWords?: string[],
+  fetchFn: typeof fetch = fetch,
+  model = DEFAULT_MODEL
+): Promise<TargetVocabularyResult> {
+  if (!apiKey || apiKey.trim() === '') {
+    const mock = getMockLesson(level, topic);
+    return {
+      topic: mock.topic,
+      level: mock.level,
+      themeDescription: mock.themeDescription,
+      title: mock.title,
+      titleTokens: mock.titleTokens,
+      targetVocabulary: mock.targetVocabulary,
+    };
+  }
+
+  const promptText = buildTargetVocabularyPrompt(level, topic, customInstruction, excludeWords);
+  const responseSchema = buildTargetVocabularySchema();
+
+  const rawText = await callGeminiStructuredApi(promptText, responseSchema, {
+    apiKey,
+    fetchFn,
+    model,
+  });
+
+  return parseAndValidateTargetVocabularyResponse(rawText, { topic, level });
+}
+
+/**
+ * Phase 2: Generates contextual dialogue passage embedding target words (and optional review words).
+ */
+export async function generatePassageForVocabulary(
+  targetVocabulary: TargetWord[],
+  topic: string,
+  level: JLPTLevel,
+  apiKey?: string,
+  customInstruction?: string,
+  reviewWords?: TargetWord[],
+  fetchFn: typeof fetch = fetch,
+  model = DEFAULT_MODEL
+): Promise<PassageResult> {
+  if (!apiKey || apiKey.trim() === '') {
+    const mock = getMockLesson(level, topic);
+    return {
+      sentences: mock.sentences,
+      speakers: mock.passage?.speakers,
+    };
+  }
+
+  const promptText = buildPassagePrompt(targetVocabulary, topic, level, customInstruction, reviewWords);
+  const responseSchema = buildPassageSchema();
+
+  const rawText = await callGeminiStructuredApi(promptText, responseSchema, {
+    apiKey,
+    fetchFn,
+    model,
+  });
+
+  return parseAndValidatePassageResponse(rawText);
+}
+
+export interface GeneratePracticePassageOptions {
+  words: TargetWord[];
+  level: JLPTLevel;
+  topic?: string;
+  apiKey?: string;
+  customInstruction?: string;
+  fetchFn?: typeof fetch;
+  model?: string;
+}
+
+/**
+ * Generates an authentic Japanese reading/listening passage using existing vocabulary from the Word Bank.
+ */
+export async function generatePracticePassage(
+  options: GeneratePracticePassageOptions
+): Promise<DailyLesson> {
+  const {
+    words,
+    level,
+    topic = 'Word Bank Vocabulary Review',
+    apiKey,
+    customInstruction,
+    fetchFn = fetch,
+    model = DEFAULT_MODEL,
+  } = options;
+
+  const now = new Date().toISOString();
+
+  if (!apiKey || apiKey.trim() === '') {
+    const mock = getMockLesson(level, topic);
+    return {
+      ...mock,
+      id: `practice-${level.toLowerCase()}-${Date.now()}`,
+      createdAt: now,
+      topic,
+      level,
+      targetVocabulary: words.length > 0 ? words : mock.targetVocabulary,
+      themeDescription: `Practice passage reviewing ${words.length} words from your Word Bank.`,
+    };
+  }
+
+  const promptText = buildPracticePassagePrompt(words, level, topic, customInstruction);
+  const responseSchema = buildPracticePassageSchema();
+
+  const rawText = await callGeminiStructuredApi(promptText, responseSchema, {
+    apiKey,
+    fetchFn,
+    model,
+  });
+
+  let parsedJson: any = {};
+  if (typeof rawText === 'string') {
+    let cleanJson = rawText.trim();
+    if (cleanJson.startsWith('```json')) cleanJson = cleanJson.slice(7);
+    else if (cleanJson.startsWith('```')) cleanJson = cleanJson.slice(3);
+    if (cleanJson.endsWith('```')) cleanJson = cleanJson.slice(0, -3);
+    try {
+      parsedJson = JSON.parse(cleanJson.trim());
+    } catch {
+      parsedJson = {};
+    }
+  } else if (rawText && typeof rawText === 'object') {
+    parsedJson = rawText;
+  }
+
+  const passageResult = parseAndValidatePassageResponse(rawText);
+  const titleTokens: SentenceToken[] = Array.isArray(parsedJson?.titleTokens)
+    ? parsedJson.titleTokens
+    : [{ surface: parsedJson?.title || topic, reading: '', isTarget: false }];
+
+  return {
+    id: `practice-${level.toLowerCase()}-${Date.now()}`,
+    createdAt: now,
+    topic,
+    level,
+    themeDescription:
+      parsedJson?.themeDescription ||
+      `Practice passage reviewing ${words.length} words from your Word Bank.`,
+    title: parsedJson?.title || topic,
+    titleTokens,
+    targetVocabulary: words,
+    sentences: passageResult.sentences,
+    isStarred: false,
+  };
+}
+
+/**
+ * Generates a full DailyLesson in a single call using Gemini API or offline mock generator.
+ */
+export async function generateLesson(
+  options: GenerateLessonOptions
+): Promise<DailyLesson> {
+  const {
+    apiKey,
+    level,
+    topic,
+    customInstruction,
+    excludeWords,
+    fetchFn = fetch,
+    model = DEFAULT_MODEL,
+  } = options;
+
+  if (!apiKey || apiKey.trim() === '') {
+    return getMockLesson(level, topic);
+  }
+
+  const promptText = buildPrompt(level, topic, customInstruction, excludeWords);
+  const responseSchema = buildResponseSchema();
+
+  const rawText = await callGeminiStructuredApi(promptText, responseSchema, {
+    apiKey,
+    fetchFn,
+    model,
+  });
+
+  return parseAndValidateLessonResponse(rawText, { topic, level });
 }
 
 /**
@@ -746,8 +1563,23 @@ export function getMockLesson(level: JLPTLevel, topic?: string): DailyLesson {
 
 export const geminiService = {
   generateLesson,
-  generateDailyLesson: (topic: string, level: JLPTLevel, apiKey?: string) =>
-    generateLesson({ topic, level, apiKey }),
+  generateDailyLesson: (
+    topic: string,
+    level: JLPTLevel,
+    apiKey?: string,
+    customInstruction?: string,
+    excludeWords?: string[]
+  ) => generateLesson({ topic, level, apiKey, customInstruction, excludeWords }),
+  generateTargetVocabulary,
+  generatePassageForVocabulary,
+  generatePracticePassage,
+  importWordList,
+  parseRawWordList,
+  buildWordImportPrompt,
+  buildWordImportSchema,
+  buildPracticePassagePrompt,
+  buildPracticePassageSchema,
+  levelGuidelines,
   validateApiKey,
   buildPrompt,
   getMockLesson,

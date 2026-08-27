@@ -34,3 +34,25 @@ jest.mock('@expo/vector-icons', () => {
     FontAwesome: MockIcon,
   };
 });
+
+// Mock @react-navigation/native for isolated screen tests
+jest.mock('@react-navigation/native', () => {
+  const actualNav = jest.requireActual('@react-navigation/native');
+  return {
+    ...actualNav,
+    useFocusEffect: (callback) => {
+      const React = require('react');
+      React.useEffect(() => {
+        const cleanup = callback();
+        return () => {
+          if (typeof cleanup === 'function') cleanup();
+        };
+      }, [callback]);
+    },
+    useNavigation: () => ({
+      navigate: jest.fn(),
+      goBack: jest.fn(),
+      setOptions: jest.fn(),
+    }),
+  };
+});
