@@ -3,6 +3,9 @@
     "name": "AI Japanese Teacher",
     "slug": "ai-japanese-teacher",
     "version": "0.1.0",
+    "experiments": {
+      "baseUrl": "/AI-Japanese-Teacher"
+    },
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
