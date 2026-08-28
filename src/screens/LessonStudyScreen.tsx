@@ -37,6 +37,8 @@ export const LessonStudyScreen: React.FC<Props> = ({ route, navigation }) => {
 
   // Word Tooltip state for highlighted words
   const [selectedWord, setSelectedWord] = useState<TargetWord | null>(null);
+  const [selectedWordIsNovel, setSelectedWordIsNovel] = useState(false);
+  const [savedNovelWords, setSavedNovelWords] = useState<Set<string>>(new Set());
   const [isTooltipVisible, setIsTooltipVisible] = useState(false);
 
   // Two-phase background passage generation state
@@ -78,22 +80,29 @@ export const LessonStudyScreen: React.FC<Props> = ({ route, navigation }) => {
           examples: w.examples,
         }));
 
+      const userSettings = await storageService.getUserSettings();
+      const allWordBank = await storageService.getWordBank();
+
       const passageResult = await geminiService.generatePassageForVocabulary(
         currentLesson.targetVocabulary,
         currentLesson.topic,
         currentLesson.level,
         apiKey,
         undefined,
-        reviewWords
+        reviewWords,
+        userSettings.vocabularyConstraint || 'strict',
+        allWordBank
       );
 
       const updatedLesson: DailyLesson = {
         ...currentLesson,
         sentences: passageResult.sentences,
+        novelWords: passageResult.novelWords,
         passage: {
           title: currentLesson.title,
           speakers: passageResult.speakers,
           sentences: passageResult.sentences,
+          novelWords: passageResult.novelWords,
         },
       };
 
@@ -127,6 +136,10 @@ export const LessonStudyScreen: React.FC<Props> = ({ route, navigation }) => {
       }
     });
 
+    storageService.getWordBank().then((bank) => {
+      setSavedNovelWords(new Set(bank.map((w) => w.word)));
+    });
+
     return () => {
       audioProvider.stop();
     };
@@ -142,8 +155,35 @@ export const LessonStudyScreen: React.FC<Props> = ({ route, navigation }) => {
     await audioProvider.playSentence(text, { rate: speechRate });
   };
 
+  const handleAddNovelWordToBank = async (word: TargetWord) => {
+    await storageService.addWordsToWordBank([word], {
+      lessonId: currentLesson.id,
+      lessonTopic: currentLesson.topic,
+      jlptLevel: currentLesson.level,
+    });
+    setSavedNovelWords((prev) => new Set([...prev, word.word]));
+  };
+
   const handleTokenPress = async (token: SentenceToken) => {
-    if (!token.isTarget) return;
+    if (!token.isTarget && !token.isNovel) return;
+
+    // Check novel words first if token is flagged as novel
+    const novelWordsList = currentLesson.novelWords || currentLesson.passage?.novelWords || [];
+    if (token.isNovel) {
+      const novelMatch = novelWordsList.find(
+        (v) =>
+          v.word === token.surface ||
+          (token.reading && v.reading === token.reading) ||
+          token.surface.includes(v.word) ||
+          v.word.includes(token.surface)
+      );
+      if (novelMatch) {
+        setSelectedWord(novelMatch);
+        setSelectedWordIsNovel(true);
+        setIsTooltipVisible(true);
+        return;
+      }
+    }
 
     // 1. Try finding in currentLesson.targetVocabulary
     const targetVocab = currentLesson.targetVocabulary || [];
@@ -152,6 +192,7 @@ export const LessonStudyScreen: React.FC<Props> = ({ route, navigation }) => {
     );
     if (directMatch) {
       setSelectedWord(directMatch);
+      setSelectedWordIsNovel(false);
       setIsTooltipVisible(true);
       return;
     }
@@ -161,6 +202,7 @@ export const LessonStudyScreen: React.FC<Props> = ({ route, navigation }) => {
     );
     if (partialMatch) {
       setSelectedWord(partialMatch);
+      setSelectedWordIsNovel(false);
       setIsTooltipVisible(true);
       return;
     }
@@ -184,6 +226,7 @@ export const LessonStudyScreen: React.FC<Props> = ({ route, navigation }) => {
           partOfSpeech: bankMatch.partOfSpeech,
           examples: bankMatch.examples,
         });
+        setSelectedWordIsNovel(false);
         setIsTooltipVisible(true);
         return;
       }
@@ -196,9 +239,10 @@ export const LessonStudyScreen: React.FC<Props> = ({ route, navigation }) => {
       word: token.surface,
       reading: token.reading || token.surface,
       romaji: '',
-      meaning: 'Target vocabulary item',
+      meaning: token.isNovel ? 'Novel vocabulary item' : 'Target vocabulary item',
       partOfSpeech: 'word',
     });
+    setSelectedWordIsNovel(Boolean(token.isNovel));
     setIsTooltipVisible(true);
   };
 
@@ -216,6 +260,7 @@ export const LessonStudyScreen: React.FC<Props> = ({ route, navigation }) => {
   const handleCloseTooltip = () => {
     setIsTooltipVisible(false);
     setSelectedWord(null);
+    setSelectedWordIsNovel(false);
   };
 
   const playSentenceInLoop = async (sentenceId: number, text: string) => {
@@ -752,6 +797,88 @@ export const LessonStudyScreen: React.FC<Props> = ({ route, navigation }) => {
               </View>
             )}
 
+            {/* ✨ New Words in this Passage (i+1 Mode) Breakdown Card */}
+            {((currentLesson.novelWords && currentLesson.novelWords.length > 0) ||
+              (currentLesson.passage?.novelWords && currentLesson.passage.novelWords.length > 0)) && (
+              <View style={styles.novelWordsCard} testID="novel-words-card">
+                <View style={styles.novelWordsHeader}>
+                  <View style={styles.novelWordsHeaderLeft}>
+                    <Ionicons name="sparkles" size={18} color="#10B981" />
+                    <Text style={styles.novelWordsTitle}>New Words in this Passage (i+1)</Text>
+                  </View>
+                  <Text style={styles.novelWordsSubtext}>
+                    Introduced in context. Save to your Word Bank to practice in future sessions.
+                  </Text>
+                </View>
+
+                <View style={styles.novelWordsList}>
+                  {(currentLesson.novelWords || currentLesson.passage?.novelWords || []).map(
+                    (novelWord, idx) => {
+                      const isSaved = savedNovelWords.has(novelWord.word);
+                      return (
+                        <View
+                          key={`novel-word-${idx}`}
+                          style={styles.novelWordRow}
+                          testID={`novel-word-item-${novelWord.word}`}
+                        >
+                          <View style={styles.novelWordInfo}>
+                            <View style={styles.novelWordTopLine}>
+                              <Text style={styles.novelWordSurface}>{novelWord.word}</Text>
+                              {novelWord.reading && novelWord.reading !== novelWord.word ? (
+                                <Text style={styles.novelWordReading}>
+                                  【{novelWord.reading}】
+                                </Text>
+                              ) : null}
+                              {novelWord.romaji ? (
+                                <Text style={styles.novelWordRomaji}>{novelWord.romaji}</Text>
+                              ) : null}
+                            </View>
+                            <Text style={styles.novelWordMeaning}>{novelWord.meaning}</Text>
+                          </View>
+
+                          <View style={styles.novelWordActions}>
+                            <TouchableOpacity
+                              style={styles.novelWordPlayBtn}
+                              onPress={() => handlePlayWord(novelWord.word)}
+                              accessibilityLabel={`Listen to ${novelWord.word}`}
+                              testID={`play-novel-word-${novelWord.word}`}
+                            >
+                              <Ionicons name="volume-medium" size={16} color="#10B981" />
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                              style={[
+                                styles.novelWordAddBtn,
+                                isSaved && styles.novelWordAddBtnSaved,
+                              ]}
+                              onPress={() => handleAddNovelWordToBank(novelWord)}
+                              disabled={isSaved}
+                              accessibilityLabel={
+                                isSaved
+                                  ? `Saved ${novelWord.word}`
+                                  : `Add ${novelWord.word} to word bank`
+                              }
+                              testID={`add-novel-word-btn-${novelWord.word}`}
+                            >
+                              <Ionicons
+                                name={isSaved ? 'checkmark-circle' : 'add'}
+                                size={14}
+                                color="#ffffff"
+                                style={{ marginRight: 4 }}
+                              />
+                              <Text style={styles.novelWordAddBtnText}>
+                                {isSaved ? 'Saved' : 'Add to Bank'}
+                              </Text>
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                      );
+                    }
+                  )}
+                </View>
+              </View>
+            )}
+
             {/* Bottom Actions Section */}
             <View style={styles.bottomActionSection}>
               <TouchableOpacity
@@ -806,6 +933,9 @@ export const LessonStudyScreen: React.FC<Props> = ({ route, navigation }) => {
       <WordTooltipModal
         visible={isTooltipVisible}
         word={selectedWord}
+        isNovel={selectedWordIsNovel}
+        isSavedToWordBank={selectedWord ? savedNovelWords.has(selectedWord.word) : false}
+        onAddToWordBank={selectedWordIsNovel ? handleAddNovelWordToBank : undefined}
         onClose={handleCloseTooltip}
         onPlayAudio={handlePlayWord}
       />
@@ -1342,6 +1472,102 @@ const styles = StyleSheet.create({
   secondaryCompleteButtonText: {
     color: '#34d399',
     fontSize: theme.typography.sizes.bodySm,
+    fontWeight: theme.typography.weights.bold,
+  },
+  novelWordsCard: {
+    backgroundColor: 'rgba(16, 185, 129, 0.08)',
+    borderRadius: theme.borderRadius.xl,
+    padding: theme.spacing.lg,
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.3)',
+    marginVertical: theme.spacing.md,
+    gap: theme.spacing.md,
+  },
+  novelWordsHeader: {
+    gap: 4,
+  },
+  novelWordsHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  novelWordsTitle: {
+    fontSize: theme.typography.sizes.bodyLg,
+    fontWeight: theme.typography.weights.bold,
+    color: '#10B981',
+  },
+  novelWordsSubtext: {
+    fontSize: theme.typography.sizes.caption,
+    color: theme.colors.text.secondary,
+    lineHeight: 16,
+  },
+  novelWordsList: {
+    gap: theme.spacing.sm,
+  },
+  novelWordRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: theme.colors.background.card,
+    borderRadius: theme.borderRadius.lg,
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: theme.spacing.sm,
+    borderWidth: 1,
+    borderColor: theme.colors.background.cardBorder,
+    gap: theme.spacing.sm,
+  },
+  novelWordInfo: {
+    flex: 1,
+    gap: 2,
+  },
+  novelWordTopLine: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 6,
+    flexWrap: 'wrap',
+  },
+  novelWordSurface: {
+    fontSize: theme.typography.sizes.bodyLg,
+    fontWeight: theme.typography.weights.bold,
+    color: theme.colors.text.primary,
+  },
+  novelWordReading: {
+    fontSize: theme.typography.sizes.caption,
+    color: '#10B981',
+    fontWeight: theme.typography.weights.medium,
+  },
+  novelWordRomaji: {
+    fontSize: theme.typography.sizes.caption,
+    color: theme.colors.text.muted,
+  },
+  novelWordMeaning: {
+    fontSize: theme.typography.sizes.bodySm,
+    color: theme.colors.text.secondary,
+  },
+  novelWordActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  novelWordPlayBtn: {
+    padding: 8,
+    borderRadius: theme.borderRadius.md,
+    backgroundColor: 'rgba(16, 185, 129, 0.12)',
+  },
+  novelWordAddBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#10B981',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: theme.borderRadius.md,
+  },
+  novelWordAddBtnSaved: {
+    backgroundColor: 'rgba(16, 185, 129, 0.4)',
+  },
+  novelWordAddBtnText: {
+    color: '#ffffff',
+    fontSize: 12,
     fontWeight: theme.typography.weights.bold,
   },
 });

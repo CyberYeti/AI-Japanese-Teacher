@@ -66,4 +66,28 @@ describe('Domain Models and Schema Validation', () => {
     expect(lesson.sentences[0].tokens[2].isTarget).toBe(true);
     expect(lesson.sentences[0].tokens[2].reading).toBe('ちゅうもん');
   });
+
+  it('should support novelWords and isNovel tokens for Comprehensible Input (i+1) mode', () => {
+    const novelWord: TargetWord = {
+      word: 'お会計',
+      reading: 'おかいけい',
+      romaji: 'okaikei',
+      meaning: 'bill / check',
+      partOfSpeech: 'noun',
+    };
+
+    const token: SentenceToken = {
+      surface: 'お会計',
+      reading: 'おかいけい',
+      isTarget: false,
+      isNovel: true,
+    };
+
+    const lesson: Partial<DailyLesson> = {
+      novelWords: [novelWord],
+    };
+
+    expect(token.isNovel).toBe(true);
+    expect(lesson.novelWords?.[0].word).toBe('お会計');
+  });
 });

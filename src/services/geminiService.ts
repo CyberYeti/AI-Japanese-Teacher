@@ -12,6 +12,8 @@ import {
   SentenceToken,
   SpeakerInfo,
   TargetWord,
+  VocabularyConstraintTier,
+  WordBankItem,
   WordExample,
 } from '../types/domain';
 
@@ -283,32 +285,94 @@ export function buildTargetVocabularySchema(): Record<string, unknown> {
   };
 }
 
+export function formatInventory(words?: (TargetWord | WordBankItem)[]): string {
+  if (!words || words.length === 0) return '';
+  const seen = new Set<string>();
+  const items: string[] = [];
+  for (const w of words) {
+    if (!w || !w.word) continue;
+    const surface = w.word.trim();
+    if (!seen.has(surface)) {
+      seen.add(surface);
+      const readingPart = w.reading ? ` (${w.reading}${w.meaning ? ` - ${w.meaning}` : ''})` : '';
+      items.push(`${surface}${readingPart}`);
+    }
+  }
+  return items.join(', ');
+}
+
+export function buildConstraintPromptSection(
+  tier: VocabularyConstraintTier = 'strict',
+  inventoryText: string,
+  totalWordCount: number,
+  level: JLPTLevel
+): string {
+  if (tier === 'strict') {
+    const sparseNote =
+      totalWordCount < 15
+        ? `\n\nSPARSE INVENTORY FALLBACK: If the provided vocabulary inventory is too small to form a full coherent dialogue, you may ONLY supplement with essential beginner survival vocabulary: はい, いいえ, ありがとう, すみません, これ, それ, あれ, 行く, 来る, 食べる, 飲む, 好き, 美味しい, 大きい, 小さい.`
+        : '';
+
+    return `\nPEDAGOGICAL CONSTRAINT: STRICT CLOSED BANK (Zero Unknown Content Words)
+1. 100% of all content words (nouns, main verbs, adjectives, adverbs) in the dialogue MUST be drawn strictly from the provided TARGET VOCABULARY and KNOWN VOCABULARY INVENTORY. Do NOT introduce any novel content vocabulary.
+2. Form natural Japanese sentences using standard level-appropriate particles (は, が, を, に, で, と, も, へ, から, まで, よ, ね) and standard JLPT ${level} inflections/copulas (です, ます, ない, たい, て-form, past tense).${sparseNote}`;
+  }
+
+  if (tier === 'i_plus_one') {
+    return `\nPEDAGOGICAL CONSTRAINT: COMPREHENSIBLE INPUT (i+1 Mode)
+1. 85-90% of the vocabulary in the dialogue must come from the TARGET VOCABULARY and KNOWN VOCABULARY INVENTORY.
+2. Intentionally introduce EXACTLY 1 to 2 level-appropriate novel vocabulary words in clear, natural context so the learner can infer their meaning from context.
+3. Return all newly introduced novel words in the 'novelWords' array with full word, reading, romaji, meaning, and partOfSpeech. In the sentence tokens, set 'isNovel': true for tokens corresponding to these novel words.`;
+  }
+
+  // natural tier
+  return `\nPEDAGOGICAL CONSTRAINT: NATURAL GRADED IMMERSION
+1. Compose an authentic, natural JLPT ${level} dialogue roleplay incorporating the target vocabulary.`;
+}
+
 export function buildPassagePrompt(
   targetVocabulary: TargetWord[],
   topic: string,
   level: JLPTLevel,
   customInstruction?: string,
-  reviewWords?: TargetWord[]
+  reviewWords?: TargetWord[],
+  constraintTier: VocabularyConstraintTier = 'strict',
+  knownVocabulary?: (TargetWord | WordBankItem)[]
 ): string {
   const wordsList = targetVocabulary
     .map((v) => `${v.word} (${v.reading} - ${v.meaning})`)
     .join(', ');
 
-  const reviewWordsText =
-    reviewWords && reviewWords.length > 0
-      ? `\n\nSECONDARY REVIEW VOCABULARY (Weave in as many as naturally fit without forcing):
-${reviewWords.map((v) => `${v.word} (${v.reading} - ${v.meaning})`).join(', ')}`
+  const combinedInventory = [
+    ...(knownVocabulary || []),
+    ...(reviewWords || []),
+  ];
+
+  const inventoryText = formatInventory(combinedInventory);
+  const inventorySection =
+    inventoryText && constraintTier !== 'natural'
+      ? `\n\nKNOWN VOCABULARY INVENTORY (User's Learned Word Bank):\n${inventoryText}`
       : '';
+
+  const totalWordsCount = targetVocabulary.length + combinedInventory.length;
+  const constraintSection = buildConstraintPromptSection(
+    constraintTier,
+    inventoryText,
+    totalWordsCount,
+    level
+  );
 
   return `You are a master Japanese language educator.
 Generate an authentic Japanese dialogue passage (4 to 8 sentences) for JLPT ${level} level on the topic "${topic}".
 
+TARGET VOCABULARY TO INCORPORATE:
+${wordsList}${inventorySection}
+${constraintSection}
+${customInstruction ? `\nAdditional Instruction: ${customInstruction}` : ''}
+
 MANDATORY REQUIREMENTS:
 1. Natural dialogue roleplay between 2 distinct speakers (Speaker A and Speaker B), with optional Narrator.
-2. Incorporate ALL of the following target vocabulary words naturally in context:
-${wordsList}${reviewWordsText}
-${customInstruction ? `Additional Instruction: ${customInstruction}` : ''}
-
+2. Incorporate ALL target vocabulary words naturally in context.
 3. Each sentence in the passage MUST have:
    - id: 1-indexed sequential number
    - speaker: Name or role of speaker (e.g. "店員 (Staff)", "田中 (Tanaka)")
@@ -316,29 +380,51 @@ ${customInstruction ? `Additional Instruction: ${customInstruction}` : ''}
    - japanese: Clean Japanese text for speech synthesis
    - english: Natural English translation
    - tokens: Array of word tokens breaking down the sentence for Furigana display.
-     Every token has 'surface' (displayed text), 'reading' (Hiragana reading for Kanji, or "" for Kana/punctuation), and 'isTarget' (true if token matches one of the target or review words).
-
-4. Return ONLY a valid JSON object strictly adhering to the schema.`;
+     Every token has 'surface' (displayed text), 'reading' (Hiragana reading for Kanji, or "" for Kana/punctuation), 'isTarget' (true if token matches one of the target words), and 'isNovel' (true if token matches a novel i+1 word).
+4. If in i+1 mode and novel words are introduced, list them in the 'novelWords' array.
+5. Return ONLY a valid JSON object strictly adhering to the schema.`;
 }
 
 export function buildPracticePassagePrompt(
   words: TargetWord[],
   level: JLPTLevel,
   topic?: string,
-  customInstruction?: string
+  customInstruction?: string,
+  constraintTier: VocabularyConstraintTier = 'strict',
+  knownVocabulary?: (TargetWord | WordBankItem)[]
 ): string {
   const chosenTopic = topic && topic.trim() ? topic.trim() : 'Natural Japanese Conversation';
   const wordsList = words
     .map((v) => `${v.word} (${v.reading} - ${v.meaning})`)
     .join(', ');
 
+  const combinedInventory = [
+    ...(knownVocabulary || []),
+    ...words,
+  ];
+
+  const inventoryText = formatInventory(combinedInventory);
+  const inventorySection =
+    inventoryText && constraintTier !== 'natural'
+      ? `\n\nKNOWN VOCABULARY INVENTORY (Available Word Bank Words):\n${inventoryText}`
+      : '';
+
+  const totalWordsCount = combinedInventory.length;
+  const constraintSection = buildConstraintPromptSection(
+    constraintTier,
+    inventoryText,
+    totalWordsCount,
+    level
+  );
+
   return `You are a master Japanese educator and conversational storyteller.
 Create an engaging, natural dialogue or short passage for a JLPT ${level} learner practicing vocabulary from their Word Bank.
 
 Target Level: JLPT ${level} (${levelGuidelines[level]})
 Topic / Scenario: ${chosenTopic}
-Available Word Bank Vocabulary: ${wordsList}
-${customInstruction ? `Additional Instruction: ${customInstruction}` : ''}
+Focus Practice Vocabulary: ${wordsList}${inventorySection}
+${constraintSection}
+${customInstruction ? `\nAdditional Instruction: ${customInstruction}` : ''}
 
 CRITICAL PEDAGOGICAL REQUIREMENTS:
 1. READABILITY IS THE PARAMOUNT GOAL: Write smooth, natural, authentic Japanese dialogue. Do NOT force or cram words if it makes the phrasing awkward or unnatural.
@@ -350,9 +436,9 @@ CRITICAL PEDAGOGICAL REQUIREMENTS:
    - speakerId: "A" or "B" or "narrator"
    - japanese: Clean Japanese text for speech synthesis
    - english: Natural English translation
-   - tokens: Array of tokens with 'surface', 'reading' (Hiragana reading for Kanji, or "" for Kana/punctuation), and 'isTarget' (true if this token matches one of the focus vocabulary words).
-
-5. Return ONLY a valid JSON object strictly adhering to the schema.`;
+   - tokens: Array of tokens with 'surface', 'reading' (Hiragana reading for Kanji, or "" for Kana/punctuation), 'isTarget' (true if this token matches one of the focus vocabulary words), and 'isNovel' (true if this token is a novel i+1 word).
+5. If in i+1 mode and novel words are introduced, return them in the 'novelWords' array.
+6. Return ONLY a valid JSON object strictly adhering to the schema.`;
 }
 
 export function buildPracticePassageSchema(): Record<string, unknown> {
@@ -368,11 +454,26 @@ export function buildPracticePassageSchema(): Record<string, unknown> {
             surface: { type: 'STRING' },
             reading: { type: 'STRING' },
             isTarget: { type: 'BOOLEAN' },
+            isNovel: { type: 'BOOLEAN' },
           },
           required: ['surface', 'reading', 'isTarget'],
         },
       },
       themeDescription: { type: 'STRING' },
+      novelWords: {
+        type: 'ARRAY',
+        items: {
+          type: 'OBJECT',
+          properties: {
+            word: { type: 'STRING' },
+            reading: { type: 'STRING' },
+            romaji: { type: 'STRING' },
+            meaning: { type: 'STRING' },
+            partOfSpeech: { type: 'STRING' },
+          },
+          required: ['word', 'reading', 'romaji', 'meaning', 'partOfSpeech'],
+        },
+      },
       sentences: {
         type: 'ARRAY',
         items: {
@@ -391,6 +492,7 @@ export function buildPracticePassageSchema(): Record<string, unknown> {
                   surface: { type: 'STRING' },
                   reading: { type: 'STRING' },
                   isTarget: { type: 'BOOLEAN' },
+                  isNovel: { type: 'BOOLEAN' },
                 },
                 required: ['surface', 'reading', 'isTarget'],
               },
@@ -408,6 +510,20 @@ export function buildPassageSchema(): Record<string, unknown> {
   return {
     type: 'OBJECT',
     properties: {
+      novelWords: {
+        type: 'ARRAY',
+        items: {
+          type: 'OBJECT',
+          properties: {
+            word: { type: 'STRING' },
+            reading: { type: 'STRING' },
+            romaji: { type: 'STRING' },
+            meaning: { type: 'STRING' },
+            partOfSpeech: { type: 'STRING' },
+          },
+          required: ['word', 'reading', 'romaji', 'meaning', 'partOfSpeech'],
+        },
+      },
       sentences: {
         type: 'ARRAY',
         items: {
@@ -426,6 +542,7 @@ export function buildPassageSchema(): Record<string, unknown> {
                   surface: { type: 'STRING' },
                   reading: { type: 'STRING' },
                   isTarget: { type: 'BOOLEAN' },
+                  isNovel: { type: 'BOOLEAN' },
                 },
                 required: ['surface', 'reading', 'isTarget'],
               },
@@ -451,6 +568,7 @@ export interface TargetVocabularyResult {
 export interface PassageResult {
   sentences: PassageSentence[];
   speakers?: SpeakerInfo[];
+  novelWords?: TargetWord[];
 }
 
 /**
@@ -637,6 +755,23 @@ export function parseAndValidatePassageResponse(raw: unknown): PassageResult {
     throw new GeminiParseError('Gemini passage response is missing sentences.', parsed);
   }
 
+  const validatedNovelWords: TargetWord[] | undefined = Array.isArray(parsed.novelWords)
+    ? parsed.novelWords.map((v: any) => ({
+      word: String(v.word || ''),
+      reading: String(v.reading || ''),
+      romaji: String(v.romaji || ''),
+      meaning: String(v.meaning || ''),
+      partOfSpeech: String(v.partOfSpeech || 'word'),
+      examples: Array.isArray(v.examples)
+        ? v.examples.map((ex: any) => ({
+          japanese: String(ex.japanese || ''),
+          reading: String(ex.reading || ''),
+          english: String(ex.english || ''),
+        }))
+        : [],
+    }))
+    : undefined;
+
   const validatedSentences: PassageSentence[] = parsed.sentences.map((s: any, idx: number) => ({
     id: typeof s.id === 'number' ? s.id : idx + 1,
     speaker: s.speaker ? String(s.speaker) : undefined,
@@ -648,12 +783,15 @@ export function parseAndValidatePassageResponse(raw: unknown): PassageResult {
         surface: String(t.surface || ''),
         reading: String(t.reading || ''),
         isTarget: Boolean(t.isTarget),
+        isNovel: Boolean(t.isNovel),
       }))
-      : [{ surface: String(s.japanese || ''), reading: '', isTarget: false }],
+      : [{ surface: String(s.japanese || ''), reading: '', isTarget: false, isNovel: false }],
   }));
 
   return {
     sentences: validatedSentences,
+    speakers: parsed.speakers,
+    novelWords: validatedNovelWords,
   };
 }
 
@@ -1108,6 +1246,8 @@ export async function generatePassageForVocabulary(
   apiKey?: string,
   customInstruction?: string,
   reviewWords?: TargetWord[],
+  constraintTier: VocabularyConstraintTier = 'strict',
+  knownVocabulary?: (TargetWord | WordBankItem)[],
   fetchFn: typeof fetch = fetch,
   model = DEFAULT_MODEL
 ): Promise<PassageResult> {
@@ -1116,10 +1256,19 @@ export async function generatePassageForVocabulary(
     return {
       sentences: mock.sentences,
       speakers: mock.passage?.speakers,
+      novelWords: mock.novelWords,
     };
   }
 
-  const promptText = buildPassagePrompt(targetVocabulary, topic, level, customInstruction, reviewWords);
+  const promptText = buildPassagePrompt(
+    targetVocabulary,
+    topic,
+    level,
+    customInstruction,
+    reviewWords,
+    constraintTier,
+    knownVocabulary
+  );
   const responseSchema = buildPassageSchema();
 
   const rawText = await callGeminiStructuredApi(promptText, responseSchema, {
@@ -1137,6 +1286,8 @@ export interface GeneratePracticePassageOptions {
   topic?: string;
   apiKey?: string;
   customInstruction?: string;
+  constraintTier?: VocabularyConstraintTier;
+  knownVocabulary?: (TargetWord | WordBankItem)[];
   fetchFn?: typeof fetch;
   model?: string;
 }
@@ -1153,6 +1304,8 @@ export async function generatePracticePassage(
     topic = 'Word Bank Vocabulary Review',
     apiKey,
     customInstruction,
+    constraintTier = 'strict',
+    knownVocabulary,
     fetchFn = fetch,
     model = DEFAULT_MODEL,
   } = options;
@@ -1169,10 +1322,18 @@ export async function generatePracticePassage(
       level,
       targetVocabulary: words.length > 0 ? words : mock.targetVocabulary,
       themeDescription: `Practice passage reviewing ${words.length} words from your Word Bank.`,
+      novelWords: mock.novelWords,
     };
   }
 
-  const promptText = buildPracticePassagePrompt(words, level, topic, customInstruction);
+  const promptText = buildPracticePassagePrompt(
+    words,
+    level,
+    topic,
+    customInstruction,
+    constraintTier,
+    knownVocabulary
+  );
   const responseSchema = buildPracticePassageSchema();
 
   const rawText = await callGeminiStructuredApi(promptText, responseSchema, {
@@ -1212,7 +1373,14 @@ export async function generatePracticePassage(
     title: parsedJson?.title || topic,
     titleTokens,
     targetVocabulary: words,
+    novelWords: passageResult.novelWords,
     sentences: passageResult.sentences,
+    passage: {
+      title: parsedJson?.title || topic,
+      speakers: passageResult.speakers,
+      sentences: passageResult.sentences,
+      novelWords: passageResult.novelWords,
+    },
     isStarred: false,
   };
 }
@@ -1577,8 +1745,13 @@ export const geminiService = {
   parseRawWordList,
   buildWordImportPrompt,
   buildWordImportSchema,
+  buildPassagePrompt,
+  buildPassageSchema,
   buildPracticePassagePrompt,
   buildPracticePassageSchema,
+  parseAndValidatePassageResponse,
+  formatInventory,
+  buildConstraintPromptSection,
   levelGuidelines,
   validateApiKey,
   buildPrompt,

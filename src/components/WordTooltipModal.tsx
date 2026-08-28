@@ -17,6 +17,9 @@ export interface WordTooltipModalProps {
   word: TargetWord | null;
   onClose: () => void;
   onPlayAudio?: (text: string) => void;
+  isNovel?: boolean;
+  isSavedToWordBank?: boolean;
+  onAddToWordBank?: (word: TargetWord) => void;
   testID?: string;
 }
 
@@ -25,6 +28,9 @@ export const WordTooltipModal: React.FC<WordTooltipModalProps> = ({
   word,
   onClose,
   onPlayAudio,
+  isNovel,
+  isSavedToWordBank = false,
+  onAddToWordBank,
   testID = 'word-tooltip-modal',
 }) => {
   if (!word) return null;
@@ -32,6 +38,12 @@ export const WordTooltipModal: React.FC<WordTooltipModalProps> = ({
   const handlePlayAudio = () => {
     if (onPlayAudio && word.word) {
       onPlayAudio(word.word);
+    }
+  };
+
+  const handleAddWord = () => {
+    if (onAddToWordBank && word) {
+      onAddToWordBank(word);
     }
   };
 
@@ -46,12 +58,30 @@ export const WordTooltipModal: React.FC<WordTooltipModalProps> = ({
       <TouchableWithoutFeedback onPress={onClose} testID="word-tooltip-backdrop">
         <View style={styles.modalOverlay}>
           <TouchableWithoutFeedback>
-            <View style={styles.tooltipCard} testID="word-tooltip-card">
+            <View
+              style={[
+                styles.tooltipCard,
+                isNovel && styles.tooltipCardNovel,
+              ]}
+              testID="word-tooltip-card"
+            >
               {/* Header */}
               <View style={styles.cardHeader}>
                 <View style={styles.badgeRow}>
-                  <View style={styles.vocabBadge}>
-                    <Text style={styles.vocabBadgeText}>VOCABULARY</Text>
+                  <View
+                    style={[
+                      styles.vocabBadge,
+                      isNovel && styles.novelBadge,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.vocabBadgeText,
+                        isNovel && styles.novelBadgeText,
+                      ]}
+                    >
+                      {isNovel ? '✨ NOVEL WORD (i+1)' : 'VOCABULARY'}
+                    </Text>
                   </View>
                   {word.partOfSpeech ? (
                     <View style={styles.posBadge}>
@@ -77,7 +107,13 @@ export const WordTooltipModal: React.FC<WordTooltipModalProps> = ({
                   {word.word}
                 </Text>
                 {word.reading && word.reading !== word.word ? (
-                  <Text style={styles.readingText} testID="tooltip-word-furigana">
+                  <Text
+                    style={[
+                      styles.readingText,
+                      isNovel && { color: '#10B981' },
+                    ]}
+                    testID="tooltip-word-furigana"
+                  >
                     【{word.reading}】
                   </Text>
                 ) : null}
@@ -101,23 +137,48 @@ export const WordTooltipModal: React.FC<WordTooltipModalProps> = ({
                 </Text>
               </View>
 
-              {/* Quick Pronounce Button */}
-              {onPlayAudio ? (
-                <TouchableOpacity
-                  style={styles.listenBtn}
-                  onPress={handlePlayAudio}
-                  activeOpacity={0.8}
-                  testID="tooltip-listen-btn"
-                >
-                  <Ionicons
-                    name="volume-medium"
-                    size={18}
-                    color="#ffffff"
-                    style={{ marginRight: 6 }}
-                  />
-                  <Text style={styles.listenBtnText}>Listen</Text>
-                </TouchableOpacity>
-              ) : null}
+              {/* Action Buttons */}
+              <View style={styles.buttonRow}>
+                {onPlayAudio ? (
+                  <TouchableOpacity
+                    style={[styles.listenBtn, onAddToWordBank && { flex: 1 }]}
+                    onPress={handlePlayAudio}
+                    activeOpacity={0.8}
+                    testID="tooltip-listen-btn"
+                  >
+                    <Ionicons
+                      name="volume-medium"
+                      size={18}
+                      color="#ffffff"
+                      style={{ marginRight: 6 }}
+                    />
+                    <Text style={styles.listenBtnText}>Listen</Text>
+                  </TouchableOpacity>
+                ) : null}
+
+                {onAddToWordBank ? (
+                  <TouchableOpacity
+                    style={[
+                      styles.addWordBtn,
+                      isSavedToWordBank && styles.addWordBtnSaved,
+                    ]}
+                    onPress={handleAddWord}
+                    disabled={isSavedToWordBank}
+                    activeOpacity={0.8}
+                    testID="tooltip-add-word-btn"
+                  >
+                    <Ionicons
+                      name={isSavedToWordBank ? 'checkmark-circle' : 'add-circle-outline'}
+                      size={18}
+                      color="#ffffff"
+                      style={{ marginRight: 6 }}
+                    />
+                    <Text style={styles.addWordBtnText}>
+                      {isSavedToWordBank ? 'Saved' : 'Add to Bank'}
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
             </View>
           </TouchableWithoutFeedback>
         </View>
@@ -260,6 +321,38 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   listenBtnText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: theme.typography.weights.bold,
+  },
+  tooltipCardNovel: {
+    borderColor: '#10B981',
+  },
+  novelBadge: {
+    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+    borderColor: 'rgba(16, 185, 129, 0.4)',
+  },
+  novelBadgeText: {
+    color: '#10B981',
+  },
+  buttonRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 4,
+  },
+  addWordBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#10B981',
+    paddingVertical: 10,
+    borderRadius: theme.borderRadius.md,
+  },
+  addWordBtnSaved: {
+    backgroundColor: 'rgba(16, 185, 129, 0.4)',
+  },
+  addWordBtnText: {
     color: '#ffffff',
     fontSize: 14,
     fontWeight: theme.typography.weights.bold,

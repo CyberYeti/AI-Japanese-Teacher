@@ -189,6 +189,8 @@ describe('LearnScreen', () => {
         expect.objectContaining({
           level: 'N5',
           apiKey: 'test-api-key-123',
+          constraintTier: 'strict',
+          knownVocabulary: mockWordBankWords,
         })
       );
       expect(saveSpy).toHaveBeenCalled();
@@ -198,6 +200,58 @@ describe('LearnScreen', () => {
         expect.objectContaining({
           initialScreen: 'dialogue',
           isPracticePassage: true,
+        })
+      );
+    });
+  });
+
+  it('allows switching vocabulary constraint tiers via the 3-way segmented pills', async () => {
+    const mockWordBankWords = [
+      {
+        id: 'w1',
+        word: '注文',
+        reading: 'ちゅうもん',
+        romaji: 'chuumon',
+        meaning: 'order',
+        partOfSpeech: 'noun',
+        jlptLevel: 'N5' as const,
+        firstEncounteredAt: '2026-08-25T10:00:00.000Z',
+        sourceLessonId: 'l1',
+        sourceLessonTopic: 'Café',
+        examples: [],
+      },
+    ];
+
+    jest.spyOn(storageService, 'getWordBank').mockResolvedValue(mockWordBankWords);
+    jest.spyOn(storageService, 'getWordsForPractice').mockResolvedValue(mockWordBankWords);
+    const generatePracticeSpy = jest
+      .spyOn(geminiService, 'generatePracticePassage')
+      .mockResolvedValue(mockLesson);
+
+    render(<LearnScreen navigation={mockNavigation} />);
+
+    // Segmented pill switcher is present
+    expect(await screen.findByTestId('tier-selector-container')).toBeTruthy();
+    expect(screen.getByTestId('tier-pill-strict')).toBeTruthy();
+    expect(screen.getByTestId('tier-pill-i_plus_one')).toBeTruthy();
+    expect(screen.getByTestId('tier-pill-natural')).toBeTruthy();
+
+    // Select i+1 tier
+    const iPlusOnePill = screen.getByTestId('tier-pill-i_plus_one');
+    fireEvent.press(iPlusOnePill);
+
+    // Switch to practice mode and generate
+    const practiceTabBtn = screen.getByTestId('mode-practice-passage-btn');
+    fireEvent.press(practiceTabBtn);
+
+    const generatePracticeBtn = await screen.findByTestId('generate-practice-btn');
+    fireEvent.press(generatePracticeBtn);
+
+    await waitFor(() => {
+      expect(generatePracticeSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          constraintTier: 'i_plus_one',
+          knownVocabulary: mockWordBankWords,
         })
       );
     });

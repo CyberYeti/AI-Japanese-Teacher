@@ -76,4 +76,25 @@ describe('FuriganaText Component', () => {
     expect(onPressTokenMock).toHaveBeenCalledTimes(1);
     expect(onPressTokenMock).toHaveBeenCalledWith(sampleTokens[2]);
   });
+
+  it('highlights novel i+1 vocabulary token and triggers onPressToken', () => {
+    const onPressTokenMock = jest.fn();
+    const novelTokens: SentenceToken[] = [
+      { surface: 'お会計', reading: 'おかいけい', isTarget: false, isNovel: true },
+      { surface: 'をお願いします', reading: '', isTarget: false },
+    ];
+
+    const { getByTestId } = render(
+      <FuriganaText
+        tokens={novelTokens}
+        mode="all"
+        onPressToken={onPressTokenMock}
+      />
+    );
+
+    const novelBtn = getByTestId('novel-token-お会計');
+    expect(novelBtn).toBeTruthy();
+    fireEvent.press(novelBtn);
+    expect(onPressTokenMock).toHaveBeenCalledWith(novelTokens[0]);
+  });
 });

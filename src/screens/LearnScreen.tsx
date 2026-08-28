@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { theme } from '../theme';
-import { JLPTLevel, TargetWord, WordBankItem } from '../types/domain';
+import { JLPTLevel, TargetWord, VocabularyConstraintTier, WordBankItem } from '../types/domain';
 import { Ionicons } from '@expo/vector-icons';
 import { geminiService, storageService } from '../services';
 
@@ -33,6 +33,7 @@ interface LearnScreenProps {
 export const LearnScreen: React.FC<LearnScreenProps> = ({ navigation }) => {
   const [activeMode, setActiveMode] = useState<'daily' | 'practice'>('daily');
   const [selectedLevel, setSelectedLevel] = useState<JLPTLevel>('N5');
+  const [constraintTier, setConstraintTier] = useState<VocabularyConstraintTier>('strict');
   const [customTopic, setCustomTopic] = useState('Ordering at a Café');
   const [activeTopic, setActiveTopic] = useState('Ordering at a Café');
   const [isGenerating, setIsGenerating] = useState(false);
@@ -50,6 +51,9 @@ export const LearnScreen: React.FC<LearnScreenProps> = ({ navigation }) => {
       const settings = await storageService.getUserSettings();
       if (settings.defaultJlptLevel) {
         setSelectedLevel(settings.defaultJlptLevel);
+      }
+      if (settings.vocabularyConstraint) {
+        setConstraintTier(settings.vocabularyConstraint);
       }
       const key = await storageService.getApiKey();
       setHasApiKey(Boolean(key && key.trim().length > 0));
@@ -189,6 +193,8 @@ export const LearnScreen: React.FC<LearnScreenProps> = ({ navigation }) => {
         level: selectedLevel,
         topic: practiceTopic.trim() || 'Word Bank Vocabulary Review',
         apiKey,
+        constraintTier,
+        knownVocabulary: wordBankItems,
       });
 
       // Auto-save practice passage to lesson history
@@ -275,6 +281,55 @@ export const LearnScreen: React.FC<LearnScreenProps> = ({ navigation }) => {
               <Text style={[styles.levelPillText, { color: currentLevelColors.text }]}>
                 JLPT {selectedLevel}
               </Text>
+            </View>
+          </View>
+
+          {/* Vocabulary Constraint Tier Segmented Switcher */}
+          <View style={styles.tierSelectorContainer} testID="tier-selector-container">
+            <View style={styles.tierSelectorHeader}>
+              <View style={styles.tierSelectorHeaderLeft}>
+                <Ionicons name="shield-checkmark-outline" size={14} color={theme.colors.brand.light} />
+                <Text style={styles.tierSelectorLabel}>Vocabulary Scope</Text>
+              </View>
+              <Text style={styles.tierSelectorHint} numberOfLines={1}>
+                {constraintTier === 'strict'
+                  ? '0 unknown words (Closed Bank)'
+                  : constraintTier === 'i_plus_one'
+                    ? '1–2 novel words (i+1 mode)'
+                    : 'Unrestricted Graded Japanese'}
+              </Text>
+            </View>
+            <View style={styles.tierPillsRow}>
+              {(
+                [
+                  { id: 'strict', label: 'Strict (0 new)' },
+                  { id: 'i_plus_one', label: 'i+1 (1–2 new)' },
+                  { id: 'natural', label: 'Natural' },
+                ] as const
+              ).map((tier) => {
+                const isSelected = constraintTier === tier.id;
+                return (
+                  <TouchableOpacity
+                    key={tier.id}
+                    style={[
+                      styles.tierPill,
+                      isSelected && styles.tierPillActive,
+                    ]}
+                    onPress={() => setConstraintTier(tier.id)}
+                    activeOpacity={0.7}
+                    testID={`tier-pill-${tier.id}`}
+                  >
+                    <Text
+                      style={[
+                        styles.tierPillText,
+                        isSelected && styles.tierPillTextActive,
+                      ]}
+                    >
+                      {tier.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
           </View>
 
@@ -1180,5 +1235,60 @@ const styles = StyleSheet.create({
   },
   wordChipReadingSelected: {
     color: theme.colors.text.secondary,
+  },
+  tierSelectorContainer: {
+    backgroundColor: theme.colors.background.card,
+    borderRadius: theme.borderRadius.xl,
+    padding: theme.spacing.md,
+    marginBottom: theme.spacing.md,
+    borderWidth: 1,
+    borderColor: theme.colors.background.cardBorder,
+    gap: theme.spacing.sm,
+  },
+  tierSelectorHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  tierSelectorHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  tierSelectorLabel: {
+    fontSize: theme.typography.sizes.caption,
+    fontWeight: theme.typography.weights.bold,
+    color: theme.colors.text.primary,
+  },
+  tierSelectorHint: {
+    fontSize: theme.typography.sizes.micro,
+    color: theme.colors.text.muted,
+  },
+  tierPillsRow: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(0, 0, 0, 0.25)',
+    borderRadius: theme.borderRadius.lg,
+    padding: 3,
+    gap: 4,
+  },
+  tierPill: {
+    flex: 1,
+    paddingVertical: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: theme.borderRadius.md,
+  },
+  tierPillActive: {
+    backgroundColor: theme.colors.brand.primary,
+    ...theme.shadows.glow,
+  },
+  tierPillText: {
+    fontSize: theme.typography.sizes.caption,
+    fontWeight: theme.typography.weights.medium,
+    color: theme.colors.text.muted,
+  },
+  tierPillTextActive: {
+    color: '#ffffff',
+    fontWeight: theme.typography.weights.bold,
   },
 });

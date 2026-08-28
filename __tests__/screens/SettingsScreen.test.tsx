@@ -206,4 +206,31 @@ describe('SettingsScreen', () => {
 
     expect(clearWordBankSpy).toHaveBeenCalled();
   });
+
+  it('updates vocabulary constraint tier preference', async () => {
+    const saveSettingsSpy = jest.spyOn(storageService, 'saveUserSettings').mockResolvedValue({
+      geminiApiKey: 'test-gemini-key',
+      preferredTtsVoice: '',
+      ttsPlaybackRate: 1.0,
+      defaultJlptLevel: 'N5',
+      vocabularyConstraint: 'i_plus_one',
+      furiganaMode: 'all',
+      englishSubtitles: true,
+      historyMaxCapacity: 25,
+    });
+
+    render(<SettingsScreen />);
+
+    await screen.findByText('Settings');
+
+    const iPlusOneBtn = screen.getByTestId('settings-constraint-i_plus_one');
+    expect(iPlusOneBtn).toBeTruthy();
+    fireEvent.press(iPlusOneBtn);
+
+    await waitFor(() => {
+      expect(saveSettingsSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ vocabularyConstraint: 'i_plus_one' })
+      );
+    });
+  });
 });

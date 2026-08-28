@@ -13,7 +13,7 @@ import {
   GeminiParseError,
   GeminiApiError,
 } from '../src/services/geminiService';
-import { JLPTLevel, DailyLesson } from '../src/types/domain';
+import { JLPTLevel, DailyLesson, TargetWord } from '../src/types/domain';
 
 describe('GeminiService', () => {
   describe('buildPrompt', () => {
@@ -499,6 +499,254 @@ describe('GeminiService', () => {
       expect(lesson.targetVocabulary).toEqual(mockWords);
       expect(lesson.sentences.length).toBeGreaterThan(0);
       expect(lesson.sentences[0].japanese).toBeTruthy();
+    });
+  });
+
+  describe('Vocabulary Constraint Tiers (Strict Closed Bank, i+1, Natural)', () => {
+    const sampleTarget: TargetWord[] = [
+      { word: '注文', reading: 'ちゅうもん', romaji: 'chuumon', meaning: 'order', partOfSpeech: 'noun' },
+      { word: '店員', reading: 'てんいん', romaji: 'ten-in', meaning: 'clerk', partOfSpeech: 'noun' },
+    ];
+
+    const sampleInventory: TargetWord[] = [
+      { word: 'コーヒー', reading: 'コーヒー', romaji: 'koohii', meaning: 'coffee', partOfSpeech: 'noun' },
+      { word: '水', reading: 'みず', romaji: 'mizu', meaning: 'water', partOfSpeech: 'noun' },
+      { word: '飲む', reading: 'のむ', romaji: 'nomu', meaning: 'to drink', partOfSpeech: 'verb' },
+      { word: '食べる', reading: 'たべる', romaji: 'taberu', meaning: 'to eat', partOfSpeech: 'verb' },
+    ];
+
+    describe('formatInventory', () => {
+      it('formats and deduplicates word entries into a readable prompt string', () => {
+        const formatted = geminiService.formatInventory([
+          ...sampleInventory,
+          { word: '水', reading: 'みず', romaji: 'mizu', meaning: 'water duplicate', partOfSpeech: 'noun' },
+        ]);
+        expect(formatted).toContain('コーヒー (コーヒー - coffee)');
+        expect(formatted).toContain('水 (みず - water)');
+        expect(formatted).toContain('飲む (のむ - to drink)');
+        // Deduplicated: should only contain '水 (' once
+        expect(formatted.split('水 (').length).toBe(2);
+      });
+
+      it('returns empty string if words array is empty or undefined', () => {
+        expect(geminiService.formatInventory([])).toBe('');
+        expect(geminiService.formatInventory(undefined)).toBe('');
+      });
+    });
+
+    describe('buildPassagePrompt', () => {
+      it('injects STRICT CLOSED BANK instructions and sparse fallback when word count is small (<15)', () => {
+        const prompt = geminiService.buildPassagePrompt(
+          sampleTarget,
+          'At a cafe',
+          'N5',
+          undefined,
+          undefined,
+          'strict',
+          sampleInventory
+        );
+
+        expect(prompt).toContain('PEDAGOGICAL CONSTRAINT: STRICT CLOSED BANK');
+        expect(prompt).toContain('100% of all content words');
+        expect(prompt).toContain('KNOWN VOCABULARY INVENTORY');
+        expect(prompt).toContain('コーヒー (コーヒー - coffee)');
+        expect(prompt).toContain('SPARSE INVENTORY FALLBACK');
+        expect(prompt).toContain('はい, いいえ, ありがとう, すみません');
+      });
+
+      it('omits sparse fallback when total inventory has 15 or more words', () => {
+        const largeInventory: TargetWord[] = Array.from({ length: 15 }, (_, i) => ({
+          word: `単語${i}`,
+          reading: `たんご${i}`,
+          romaji: `tango${i}`,
+          meaning: `word ${i}`,
+          partOfSpeech: 'noun',
+        }));
+
+        const prompt = geminiService.buildPassagePrompt(
+          sampleTarget,
+          'At a cafe',
+          'N5',
+          undefined,
+          undefined,
+          'strict',
+          largeInventory
+        );
+
+        expect(prompt).toContain('PEDAGOGICAL CONSTRAINT: STRICT CLOSED BANK');
+        expect(prompt).not.toContain('SPARSE INVENTORY FALLBACK');
+      });
+
+      it('injects COMPREHENSIBLE INPUT (i+1) instructions when in i_plus_one mode', () => {
+        const prompt = geminiService.buildPassagePrompt(
+          sampleTarget,
+          'At a cafe',
+          'N5',
+          undefined,
+          undefined,
+          'i_plus_one',
+          sampleInventory
+        );
+
+        expect(prompt).toContain('PEDAGOGICAL CONSTRAINT: COMPREHENSIBLE INPUT (i+1 Mode)');
+        expect(prompt).toContain('EXACTLY 1 to 2 level-appropriate novel vocabulary words');
+        expect(prompt).toContain("'novelWords' array");
+      });
+
+      it('injects NATURAL GRADED IMMERSION instructions when in natural mode', () => {
+        const prompt = geminiService.buildPassagePrompt(
+          sampleTarget,
+          'At a cafe',
+          'N5',
+          undefined,
+          undefined,
+          'natural',
+          sampleInventory
+        );
+
+        expect(prompt).toContain('PEDAGOGICAL CONSTRAINT: NATURAL GRADED IMMERSION');
+        expect(prompt).not.toContain('KNOWN VOCABULARY INVENTORY');
+      });
+    });
+
+    describe('buildPracticePassagePrompt', () => {
+      it('builds practice passage prompt with strict closed bank constraints and inventory', () => {
+        const prompt = geminiService.buildPracticePassagePrompt(
+          sampleTarget,
+          'N5',
+          'Practice Session',
+          undefined,
+          'strict',
+          sampleInventory
+        );
+
+        expect(prompt).toContain('PEDAGOGICAL CONSTRAINT: STRICT CLOSED BANK');
+        expect(prompt).toContain('KNOWN VOCABULARY INVENTORY');
+        expect(prompt).toContain('Focus Practice Vocabulary: 注文 (ちゅうもん - order), 店員 (てんいん - clerk)');
+      });
+
+      it('builds practice passage prompt with i+1 constraints', () => {
+        const prompt = geminiService.buildPracticePassagePrompt(
+          sampleTarget,
+          'N5',
+          'Practice Session',
+          undefined,
+          'i_plus_one',
+          sampleInventory
+        );
+
+        expect(prompt).toContain('PEDAGOGICAL CONSTRAINT: COMPREHENSIBLE INPUT (i+1 Mode)');
+      });
+    });
+
+    describe('buildPassageSchema and buildPracticePassageSchema', () => {
+      it('includes novelWords in schemas', () => {
+        const passageSchema = geminiService.buildPassageSchema();
+        expect(passageSchema.properties).toHaveProperty('novelWords');
+
+        const practiceSchema = geminiService.buildPracticePassageSchema();
+        expect(practiceSchema.properties).toHaveProperty('novelWords');
+      });
+    });
+
+    describe('parseAndValidatePassageResponse with novel words', () => {
+      it('parses novelWords and marks isNovel on sentence tokens correctly', () => {
+        const rawJson = JSON.stringify({
+          sentences: [
+            {
+              id: 1,
+              speaker: '店員',
+              speakerId: 'A',
+              japanese: 'お会計はこちらです。',
+              english: 'The bill is over here.',
+              tokens: [
+                { surface: 'お会計', reading: 'おかいけい', isTarget: false, isNovel: true },
+                { surface: 'はこちらです。', reading: '', isTarget: false, isNovel: false },
+              ],
+            },
+          ],
+          novelWords: [
+            {
+              word: 'お会計',
+              reading: 'おかいけい',
+              romaji: 'okaikei',
+              meaning: 'bill / check',
+              partOfSpeech: 'noun',
+            },
+          ],
+        });
+
+        const result = geminiService.parseAndValidatePassageResponse(rawJson);
+        expect(result.sentences.length).toBe(1);
+        expect(result.sentences[0].tokens[0].isNovel).toBe(true);
+        expect(result.novelWords).toBeDefined();
+        expect(result.novelWords?.length).toBe(1);
+        expect(result.novelWords?.[0].word).toBe('お会計');
+        expect(result.novelWords?.[0].meaning).toBe('bill / check');
+      });
+    });
+
+    describe('generatePracticePassage with novelWords return', () => {
+      it('returns novelWords in practice passage DailyLesson', async () => {
+        const mockApiResponse = {
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      title: 'カフェで会話',
+                      titleTokens: [{ surface: 'カフェで会話', reading: '', isTarget: false }],
+                      sentences: [
+                        {
+                          id: 1,
+                          speaker: '店員',
+                          speakerId: 'A',
+                          japanese: 'お会計をお願いします。',
+                          english: 'Please pay the bill.',
+                          tokens: [
+                            { surface: 'お会計', reading: 'おかいけい', isTarget: false, isNovel: true },
+                            { surface: 'をお願いします。', reading: '', isTarget: false },
+                          ],
+                        },
+                      ],
+                      novelWords: [
+                        {
+                          word: 'お会計',
+                          reading: 'おかいけい',
+                          romaji: 'okaikei',
+                          meaning: 'bill / check',
+                          partOfSpeech: 'noun',
+                        },
+                      ],
+                    }),
+                  },
+                ],
+              },
+            },
+          ],
+        };
+
+        const mockFetch = jest.fn().mockResolvedValue({
+          ok: true,
+          status: 200,
+          json: async () => mockApiResponse,
+        } as any);
+
+        const lesson = await geminiService.generatePracticePassage({
+          words: sampleTarget,
+          level: 'N5',
+          constraintTier: 'i_plus_one',
+          knownVocabulary: sampleInventory,
+          apiKey: 'test-api-key',
+          fetchFn: mockFetch as any,
+        });
+
+        expect(lesson).toBeDefined();
+        expect(lesson.novelWords?.length).toBe(1);
+        expect(lesson.novelWords?.[0].word).toBe('お会計');
+        expect(lesson.sentences[0].tokens[0].isNovel).toBe(true);
+      });
     });
   });
 });

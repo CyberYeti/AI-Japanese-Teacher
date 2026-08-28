@@ -351,4 +351,136 @@ describe('LessonStudyScreen', () => {
     // Tooltip is dismissed
     expect(screen.queryByTestId('word-tooltip-card')).toBeNull();
   });
+
+  it('renders "New Words in this Passage" breakdown card and supports 1-tap word bank saving', async () => {
+    const novelSentences = [
+      {
+        id: 1,
+        speaker: '店員 (Staff)',
+        japanese: 'お会計はこちらです。',
+        english: 'The bill is over here.',
+        tokens: [
+          { surface: 'お会計', reading: 'おかいけい', isTarget: false, isNovel: true },
+          { surface: 'はこちらです。', reading: '', isTarget: false },
+        ],
+      },
+    ];
+
+    const lessonWithNovelWords: DailyLesson = {
+      ...mockLesson,
+      id: 'lesson-novel-1',
+      sentences: novelSentences,
+      novelWords: [
+        {
+          word: 'お会計',
+          reading: 'おかいけい',
+          romaji: 'okaikei',
+          meaning: 'bill / check',
+          partOfSpeech: 'noun',
+        },
+      ],
+      passage: {
+        ...mockLesson.passage!,
+        novelWords: [
+          {
+            word: 'お会計',
+            reading: 'おかいけい',
+            romaji: 'okaikei',
+            meaning: 'bill / check',
+            partOfSpeech: 'noun',
+          },
+        ],
+        sentences: novelSentences,
+      },
+    };
+
+    const addWordsSpy = jest.spyOn(storageService, 'addWordsToWordBank').mockResolvedValue([]);
+
+    render(
+      <LessonStudyScreen
+        navigation={mockNavigation}
+        route={{ params: { lesson: lessonWithNovelWords, initialScreen: 'dialogue' } } as any}
+      />
+    );
+
+    // Novel words card should be present
+    await waitFor(() => {
+      expect(screen.getByTestId('novel-words-card')).toBeTruthy();
+      expect(screen.getByText('New Words in this Passage (i+1)')).toBeTruthy();
+      expect(screen.getByTestId('novel-word-item-お会計')).toBeTruthy();
+      expect(screen.getByText('bill / check')).toBeTruthy();
+    });
+
+    // 1-tap Add to Bank button
+    const addBtn = screen.getByTestId('add-novel-word-btn-お会計');
+    expect(addBtn).toBeTruthy();
+    fireEvent.press(addBtn);
+
+    await waitFor(() => {
+      expect(addWordsSpy).toHaveBeenCalledWith(
+        [
+          expect.objectContaining({
+            word: 'お会計',
+            reading: 'おかいけい',
+            meaning: 'bill / check',
+          }),
+        ],
+        expect.any(Object)
+      );
+      expect(screen.getByText('Saved')).toBeTruthy();
+    });
+  });
+
+  it('opens novel word tooltip modal when tapping a novel token in dialogue', async () => {
+    const novelSentences = [
+      {
+        id: 1,
+        speaker: '店員 (Staff)',
+        japanese: 'お会計はこちらです。',
+        english: 'The bill is over here.',
+        tokens: [
+          { surface: 'お会計', reading: 'おかいけい', isTarget: false, isNovel: true },
+          { surface: 'はこちらです。', reading: '', isTarget: false },
+        ],
+      },
+    ];
+
+    const lessonWithNovelToken: DailyLesson = {
+      ...mockLesson,
+      id: 'lesson-novel-2',
+      sentences: novelSentences,
+      novelWords: [
+        {
+          word: 'お会計',
+          reading: 'おかいけい',
+          romaji: 'okaikei',
+          meaning: 'bill / check',
+          partOfSpeech: 'noun',
+        },
+      ],
+      passage: {
+        ...mockLesson.passage!,
+        sentences: novelSentences,
+      },
+    };
+
+    render(
+      <LessonStudyScreen
+        navigation={mockNavigation}
+        route={{ params: { lesson: lessonWithNovelToken, initialScreen: 'dialogue' } } as any}
+      />
+    );
+
+    const novelToken = screen.getByTestId('novel-token-お会計');
+    expect(novelToken).toBeTruthy();
+    fireEvent.press(novelToken);
+
+    // Tooltip opens with novel badge
+    const tooltipCard = screen.getByTestId('word-tooltip-card');
+    expect(tooltipCard).toBeTruthy();
+    const cardScope = within(tooltipCard);
+    expect(cardScope.getByText('✨ NOVEL WORD (i+1)')).toBeTruthy();
+    expect(cardScope.getByText('お会計')).toBeTruthy();
+    expect(cardScope.getByText('bill / check')).toBeTruthy();
+  });
 });

@@ -18,7 +18,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { theme } from '../theme';
-import { JLPTLevel } from '../types/domain';
+import { JLPTLevel, VocabularyConstraintTier } from '../types/domain';
 import { Ionicons } from '@expo/vector-icons';
 import { storageService, geminiService } from '../services';
 
@@ -34,6 +34,7 @@ export const SettingsScreen: React.FC = () => {
   const [showKey, setShowKey] = useState(false);
   const [selectedSpeed, setSelectedSpeed] = useState<number>(1.0);
   const [defaultLevel, setDefaultLevel] = useState<JLPTLevel>('N5');
+  const [vocabularyConstraint, setVocabularyConstraint] = useState<VocabularyConstraintTier>('strict');
   const [furiganaMode, setFuriganaMode] = useState<'all' | 'target-only' | 'hidden'>('all');
   const [englishSubtitles, setEnglishSubtitles] = useState(true);
   const [isTestingKey, setIsTestingKey] = useState(false);
@@ -63,6 +64,7 @@ export const SettingsScreen: React.FC = () => {
       const settings = await storageService.getUserSettings();
       if (settings.ttsPlaybackRate) setSelectedSpeed(settings.ttsPlaybackRate);
       if (settings.defaultJlptLevel) setDefaultLevel(settings.defaultJlptLevel);
+      if (settings.vocabularyConstraint) setVocabularyConstraint(settings.vocabularyConstraint);
       if (settings.furiganaMode) setFuriganaMode(settings.furiganaMode);
       if (typeof settings.englishSubtitles === 'boolean') {
         setEnglishSubtitles(settings.englishSubtitles);
@@ -118,6 +120,11 @@ export const SettingsScreen: React.FC = () => {
   const handleSaveFurigana = async (mode: 'all' | 'target-only' | 'hidden') => {
     setFuriganaMode(mode);
     await storageService.saveUserSettings({ furiganaMode: mode });
+  };
+
+  const handleSaveConstraint = async (tier: VocabularyConstraintTier) => {
+    setVocabularyConstraint(tier);
+    await storageService.saveUserSettings({ vocabularyConstraint: tier });
   };
 
   const handleSaveSubtitles = async (val: boolean) => {
@@ -463,6 +470,74 @@ export const SettingsScreen: React.FC = () => {
               trackColor={{ false: theme.colors.background.secondary, true: theme.colors.brand.primary }}
               thumbColor="#ffffff"
             />
+          </View>
+        </View>
+
+        {/* Passage Vocabulary Constraint Section */}
+        <View style={styles.card}>
+          <View style={styles.cardHeader}>
+            <Ionicons name="shield-checkmark-outline" size={20} color={theme.colors.brand.primary} />
+            <Text style={styles.cardTitle}>Passage Vocabulary Constraint</Text>
+          </View>
+          <Text style={styles.cardSubtitle}>
+            Control whether AI passage generation strictly uses only your cumulative Word Bank or introduces new immersion vocabulary.
+          </Text>
+
+          <View style={styles.constraintList}>
+            {[
+              {
+                id: 'strict' as const,
+                title: 'Strict Closed Bank',
+                tag: '0 Unknown Content Words',
+                tagColor: '#3b82f6',
+                desc: 'Guarantees passages use strictly words already in your Word Bank. Ideal for beginners focusing on pure sentence comprehension and recall.',
+              },
+              {
+                id: 'i_plus_one' as const,
+                title: 'Comprehensible Input (i+1)',
+                tag: '1–2 Novel Words',
+                tagColor: '#10b981',
+                desc: 'Builds sentences from your known Word Bank while introducing 1–2 target novel words in context with instant 1-tap word bank acquisition.',
+              },
+              {
+                id: 'natural' as const,
+                title: 'Natural Graded Immersion',
+                tag: 'Standard JLPT',
+                tagColor: '#f59e0b',
+                desc: 'Generates free-flowing authentic Japanese at your target JLPT level without restricting content words to your personal bank.',
+              },
+            ].map((item) => {
+              const isSelected = vocabularyConstraint === item.id;
+              return (
+                <TouchableOpacity
+                  key={item.id}
+                  style={[styles.constraintCard, isSelected && styles.constraintCardActive]}
+                  onPress={() => handleSaveConstraint(item.id)}
+                  activeOpacity={0.7}
+                  testID={`settings-constraint-${item.id}`}
+                >
+                  <View style={styles.constraintTopRow}>
+                    <View style={styles.constraintTitleGroup}>
+                      <Ionicons
+                        name={isSelected ? 'radio-button-on' : 'radio-button-off'}
+                        size={18}
+                        color={isSelected ? theme.colors.brand.primary : theme.colors.text.muted}
+                        style={{ marginRight: 8 }}
+                      />
+                      <Text style={[styles.constraintTitle, isSelected && styles.constraintTitleActive]}>
+                        {item.title}
+                      </Text>
+                    </View>
+                    <View style={[styles.constraintTag, { borderColor: item.tagColor }]}>
+                      <Text style={[styles.constraintTagText, { color: item.tagColor }]}>
+                        {item.tag}
+                      </Text>
+                    </View>
+                  </View>
+                  <Text style={styles.constraintDesc}>{item.desc}</Text>
+                </TouchableOpacity>
+              );
+            })}
           </View>
         </View>
 
@@ -1317,5 +1392,56 @@ const styles = StyleSheet.create({
     fontSize: theme.typography.sizes.micro,
     color: theme.colors.text.subtle,
     marginTop: 2,
+  },
+  constraintList: {
+    gap: theme.spacing.sm,
+    marginTop: theme.spacing.xs,
+  },
+  constraintCard: {
+    backgroundColor: theme.colors.background.card,
+    borderRadius: theme.borderRadius.lg,
+    padding: theme.spacing.md,
+    borderWidth: 1,
+    borderColor: theme.colors.background.cardBorder,
+    gap: 6,
+  },
+  constraintCardActive: {
+    borderColor: theme.colors.brand.primary,
+    backgroundColor: 'rgba(225, 29, 72, 0.06)',
+  },
+  constraintTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  constraintTitleGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  constraintTitle: {
+    fontSize: theme.typography.sizes.bodySm,
+    fontWeight: theme.typography.weights.bold,
+    color: theme.colors.text.primary,
+  },
+  constraintTitleActive: {
+    color: theme.colors.brand.light,
+  },
+  constraintTag: {
+    borderWidth: 1,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: theme.borderRadius.sm,
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+  },
+  constraintTagText: {
+    fontSize: 10,
+    fontWeight: theme.typography.weights.bold,
+  },
+  constraintDesc: {
+    fontSize: theme.typography.sizes.caption,
+    color: theme.colors.text.secondary,
+    lineHeight: 18,
+    paddingLeft: 26,
   },
 });

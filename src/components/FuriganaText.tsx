@@ -12,6 +12,7 @@ export interface FuriganaTextProps {
   textColor?: string;
   readingColor?: string;
   targetHighlightColor?: string;
+  novelHighlightColor?: string;
   style?: ViewStyle;
   testID?: string;
   onPressToken?: (token: SentenceToken) => void;
@@ -24,6 +25,7 @@ export const FuriganaText: React.FC<FuriganaTextProps> = ({
   textColor = theme.colors.text.primary,
   readingColor = theme.colors.text.secondary,
   targetHighlightColor = theme.colors.brand.light,
+  novelHighlightColor = '#10B981',
   style,
   testID,
   onPressToken,
@@ -33,7 +35,7 @@ export const FuriganaText: React.FC<FuriganaTextProps> = ({
   const shouldShowReading = (token: SentenceToken): boolean => {
     if (!token.reading || token.reading === token.surface) return false;
     if (mode === 'all') return true;
-    if (mode === 'target-only') return token.isTarget;
+    if (mode === 'target-only') return Boolean(token.isTarget || token.isNovel);
     if (mode === 'hidden') return false;
     return false;
   };
@@ -42,9 +44,27 @@ export const FuriganaText: React.FC<FuriganaTextProps> = ({
     <View style={[styles.container, style]} testID={testID}>
       {tokens.map((token, index) => {
         const hasReading = shouldShowReading(token);
-        const isTarget = token.isTarget;
-        const currentTextColor = isTarget ? targetHighlightColor : textColor;
-        const currentReadingColor = isTarget ? targetHighlightColor : readingColor;
+        const isTarget = Boolean(token.isTarget);
+        const isNovel = Boolean(token.isNovel);
+        const isInteractive = (isTarget || isNovel) && Boolean(onPressToken);
+
+        const currentTextColor = isTarget
+          ? targetHighlightColor
+          : isNovel
+            ? novelHighlightColor
+            : textColor;
+
+        const currentReadingColor = isTarget
+          ? targetHighlightColor
+          : isNovel
+            ? novelHighlightColor
+            : readingColor;
+
+        const tokenTestID = isTarget
+          ? `target-token-${token.surface}`
+          : isNovel
+            ? `novel-token-${token.surface}`
+            : undefined;
 
         if (hasReading) {
           const content = (
@@ -55,7 +75,7 @@ export const FuriganaText: React.FC<FuriganaTextProps> = ({
                   {
                     fontSize: readingFontSize,
                     color: currentReadingColor,
-                    fontWeight: isTarget ? '700' : '500',
+                    fontWeight: isTarget || isNovel ? '700' : '500',
                   },
                 ]}
                 numberOfLines={1}
@@ -68,7 +88,7 @@ export const FuriganaText: React.FC<FuriganaTextProps> = ({
                   {
                     fontSize: fontSize,
                     color: currentTextColor,
-                    fontWeight: isTarget ? '700' : '500',
+                    fontWeight: isTarget || isNovel ? '700' : '500',
                   },
                 ]}
               >
@@ -77,16 +97,20 @@ export const FuriganaText: React.FC<FuriganaTextProps> = ({
             </>
           );
 
-          if (isTarget && onPressToken) {
+          if (isInteractive) {
             return (
               <TouchableOpacity
                 key={`token-${index}`}
-                style={[styles.rubyPair, styles.targetRubyPair]}
-                onPress={() => onPressToken(token)}
+                style={[
+                  styles.rubyPair,
+                  isTarget && styles.targetRubyPair,
+                  isNovel && styles.novelRubyPair,
+                ]}
+                onPress={() => onPressToken?.(token)}
                 activeOpacity={0.7}
                 accessibilityRole="button"
                 accessibilityLabel={`${token.surface}, reading: ${token.reading}`}
-                testID={`target-token-${token.surface}`}
+                testID={tokenTestID}
               >
                 {content}
               </TouchableOpacity>
@@ -99,8 +123,9 @@ export const FuriganaText: React.FC<FuriganaTextProps> = ({
               style={[
                 styles.rubyPair,
                 isTarget && styles.targetRubyPair,
+                isNovel && styles.novelRubyPair,
               ]}
-              testID={isTarget ? `target-token-${token.surface}` : undefined}
+              testID={tokenTestID}
             >
               {content}
             </View>
@@ -115,7 +140,7 @@ export const FuriganaText: React.FC<FuriganaTextProps> = ({
               {
                 fontSize: fontSize,
                 color: currentTextColor,
-                fontWeight: isTarget ? '700' : '400',
+                fontWeight: isTarget || isNovel ? '700' : '400',
               },
             ]}
           >
@@ -123,16 +148,20 @@ export const FuriganaText: React.FC<FuriganaTextProps> = ({
           </Text>
         );
 
-        if (isTarget && onPressToken) {
+        if (isInteractive) {
           return (
             <TouchableOpacity
               key={`token-${index}`}
-              style={[styles.plainPair, styles.targetPlainPair]}
-              onPress={() => onPressToken(token)}
+              style={[
+                styles.plainPair,
+                isTarget && styles.targetPlainPair,
+                isNovel && styles.novelPlainPair,
+              ]}
+              onPress={() => onPressToken?.(token)}
               activeOpacity={0.7}
               accessibilityRole="button"
               accessibilityLabel={`${token.surface}`}
-              testID={`target-token-${token.surface}`}
+              testID={tokenTestID}
             >
               {plainContent}
             </TouchableOpacity>
@@ -145,8 +174,9 @@ export const FuriganaText: React.FC<FuriganaTextProps> = ({
             style={[
               styles.plainPair,
               isTarget && styles.targetPlainPair,
+              isNovel && styles.novelPlainPair,
             ]}
-            testID={isTarget ? `target-token-${token.surface}` : undefined}
+            testID={tokenTestID}
           >
             {plainContent}
           </View>
@@ -189,5 +219,13 @@ const styles = StyleSheet.create({
   targetPlainPair: {
     borderBottomWidth: 1.5,
     borderBottomColor: theme.colors.brand.primary,
+  },
+  novelRubyPair: {
+    borderBottomWidth: 1.5,
+    borderBottomColor: '#10B981',
+  },
+  novelPlainPair: {
+    borderBottomWidth: 1.5,
+    borderBottomColor: '#10B981',
   },
 });

@@ -49,6 +49,15 @@ The practice of supplying a subset of previously learned Word Bank entries as se
 - 🗂️ **Word Bank**: Cumulative dictionary of all learned and imported words with compact list display, multi-accordion expansion, search, and individual audio playback.
 - ⚙️ **Settings**: Gemini API key management, Word List Import tool, Japanese voice selection, default speed preference, default JLPT level, and local data management.
 
+### Vocabulary Constraint Tiers
+A user-configurable constraint level governing how strictly passage generation (both Daily Lesson dialogues and Practice Passages) is bounded by the user's learned words:
+1. **Strict Closed Bank**: 100% of content words (nouns, verbs, adjectives, adverbs) must originate strictly from the user's Word Bank (plus the current session's Target Vocabulary in Daily Lessons), bound together with level-appropriate Japanese grammatical particles and standard copulas/inflections. Zero unlearned content words.
+2. **Comprehensible Input (i+1)**: 85–90% Word Bank vocabulary, intentionally introducing 1–2 level-appropriate novel words in context with explicit glossing.
+3. **Natural Graded Immersion**: Free-form level-appropriate Japanese dialogue embedding the target words without strict Word Bank confinement.
+
+### Known Vocabulary Inventory
+The complete collection of user-acquired Word Bank entries (surfaces, readings, and core definitions) injected directly into the language model's generation prompt to serve as an authoritative closed-dictionary boundary for Strict and i+1 passage generation.
+
 ### Gemini Model Configuration
 The application is configured with the following active Gemini model identifiers:
 - Primary default: `gemini-3.5-flash-lite`
@@ -56,4 +65,11 @@ The application is configured with the following active Gemini model identifiers
 
 > [!NOTE]
 > These model identifiers have been validated as active and working in this environment. Future revisions should leave these model names intact and not revert them.
+
+## Architecture Roadmap & Optimization Notes
+
+### Client-Side Japanese Tokenization (Kuromoji / MeCab)
+- **Goal**: Offload Furigana parsing and token segmentation from Gemini to a client-side library (e.g. `kuromoji.js` or a lightweight dictionary tokenizer).
+- **Benefit**: Reduces LLM response payload by ~60% (generating only raw Japanese text + English translations rather than large structured token arrays), significantly speeding up passage generation times and decreasing token costs.
+
 

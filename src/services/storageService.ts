@@ -28,6 +28,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   furiganaMode: 'all',
   englishSubtitles: true,
   historyMaxCapacity: 25,
+  vocabularyConstraint: 'strict',
 };
 
 export interface LessonFilterOptions {

@@ -104,21 +104,25 @@ describe('StorageService', () => {
       expect(settings.defaultJlptLevel).toBe('N5');
       expect(settings.historyMaxCapacity).toBe(25);
       expect(settings.ttsPlaybackRate).toBe(1.0);
+      expect(settings.vocabularyConstraint).toBe('strict');
     });
 
     it('persists partial setting updates and merges with existing', async () => {
       const updated = await storageService.saveUserSettings({
         defaultJlptLevel: 'N3',
         ttsPlaybackRate: 0.75,
+        vocabularyConstraint: 'i_plus_one',
       });
 
       expect(updated.defaultJlptLevel).toBe('N3');
       expect(updated.ttsPlaybackRate).toBe(0.75);
+      expect(updated.vocabularyConstraint).toBe('i_plus_one');
       expect(updated.preferredTtsVoice).toBe(DEFAULT_USER_SETTINGS.preferredTtsVoice);
 
       const retrieved = await storageService.getUserSettings();
       expect(retrieved.defaultJlptLevel).toBe('N3');
       expect(retrieved.ttsPlaybackRate).toBe(0.75);
+      expect(retrieved.vocabularyConstraint).toBe('i_plus_one');
     });
 
     it('manages Gemini API key directly', async () => {

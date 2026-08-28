@@ -9,6 +9,8 @@ export type FuriganaMode = 'all' | 'target-only' | 'hidden';
 
 export type SpeakerGender = 'male' | 'female' | 'neutral';
 
+export type VocabularyConstraintTier = 'strict' | 'i_plus_one' | 'natural';
+
 export interface TargetWord {
   word: string; // e.g. "注文"
   reading: string; // e.g. "ちゅうもん"
@@ -28,6 +30,7 @@ export interface SentenceToken {
   surface: string; // e.g. "店員" or "さん"
   reading: string; // Hiragana reading for kanji, or "" for kana/punctuation
   isTarget: boolean; // true if this token matches a target vocabulary word
+  isNovel?: boolean; // true if this token represents a newly introduced i+1 vocabulary word
 }
 
 export interface SpeakerInfo {
@@ -59,6 +62,7 @@ export interface DailyLesson {
   level: JLPTLevel;
   themeDescription: string;
   targetVocabulary: TargetWord[];
+  novelWords?: TargetWord[]; // Level-appropriate bonus words introduced in i+1 mode
   title: string;
   titleTokens: SentenceToken[];
   sentences: PassageSentence[];
@@ -67,6 +71,7 @@ export interface DailyLesson {
     titleEnglish?: string;
     speakers?: SpeakerInfo[];
     sentences: PassageSentence[];
+    novelWords?: TargetWord[];
   };
   isStarred: boolean;
 }
@@ -95,6 +100,7 @@ export interface UserSettings {
   furiganaMode: 'all' | 'target-only' | 'hidden';
   englishSubtitles: boolean;
   historyMaxCapacity: number; // default 25
+  vocabularyConstraint?: VocabularyConstraintTier; // default 'strict'
 }
 
 export interface PlaybackOptions {
